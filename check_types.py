@@ -1,0 +1,11 @@
+import pandas as pd
+df = pd.read_csv('output/Sample_Policy_Data_CLEANED_20260122_221335.csv')
+print('Data types:')
+print(df[['premium', 'agent_commission', 'coverage_limit']].dtypes)
+print()
+print('Agent Commission sample values:')
+print(df['agent_commission'].head(5))
+print(f'Type: {type(df["agent_commission"].iloc[0])}')
+print()
+print('Values > 100:')
+print(df[df['agent_commission'] > 100])

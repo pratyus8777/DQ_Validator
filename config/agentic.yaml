@@ -1,0 +1,57 @@
+# Agentic DQ Platform - Configuration
+
+mode: hybrid
+
+# LLM Configuration (uses Ollama locally, free)
+llm:
+  ollama_url: "http://localhost:11434"
+  model: "mistral"
+  temperature: 0.3
+  max_retries: 2
+  timeout_seconds: 30
+
+# Data Input Configuration
+input:
+  sample_data: "data/Sample_Policy_Data.csv"
+  dq_rules_path: "data/DQ_Rule_Repository-Policy.csv"
+  cleansing_rules_path: "data/Guidewire_Policy_DataCleansing_Rules.csv"
+  kpis_path: "data/DQ_Dashboard_KPIs.csv"
+
+# Data Output Configuration
+output:
+  type: "local"
+  location: "output/"
+
+# Thresholds and Gates
+thresholds:
+  remediation_trigger_pct: 0.05
+  high_confidence_auto_approve: 0.90
+  min_hitl_review_confidence: 0.50
+
+# Processing Options
+processing:
+  hitl_enabled: true
+  batch_size: 100
+  min_confidence: 0.5
+  parallel_processing: true
+
+# Assessment Configuration
+assessment:
+  include_dimensions:
+    - completeness
+    - validity
+    - consistency
+    - uniqueness
+    - accuracy
+  generate_excel_report: true
+
+# Remediation Configuration
+remediation:
+  deterministic_first: true
+  max_llm_attempts: 2
+  rollback_on_failure: true
+
+# Logging
+logging:
+  level: "INFO"
+  file: "logs/dq_pipeline.log"

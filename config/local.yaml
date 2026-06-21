@@ -1,0 +1,32 @@
+mode: local
+
+# Local mode: No DB, use only local files
+database:
+  primary: local
+  neon:
+    enabled: false  # Disabled in local mode
+  fallback_on_error: true
+
+paths:
+  sample_data: data/Sample_Policy_Data.csv
+  dq_rules: data/DQ_Rule_Repository-Policy.csv
+  cleansing_rules: data/Guidewire_Policy_DataCleansing_Rules.csv
+  kpis: data/DQ_Dashboard_KPIs.csv
+
+output:
+  dir: output/
+  cleansing_rules_json: output/cleansing_rules.json
+
+thresholds:
+  remediation_trigger_pct: 0.05
+
+llm:
+  enabled: false
+  provider: ollama
+  model: llama2
+  base_url: http://localhost:11434
+  timeout: 3
+  fast_timeout: 1
+  max_attempts: 1
+  type: local
+  path: output/learning_memory.json

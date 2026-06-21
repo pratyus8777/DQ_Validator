@@ -1,0 +1,38 @@
+mode: hybrid
+
+# Hybrid mode: Primary=Neon DB, Fallback=Local CSV/JSON
+database:
+  primary: neon
+  neon:
+    enabled: true
+    schema: dq_validator
+    # Connection via env var NEON_DB_URL or embedded default
+    sample_data_table: sample_policy_data
+    rules_table: guidewire_policy_data_cleansing_rules
+  
+  fallback_on_error: true  # If DB unavailable, use local files
+
+paths:
+  sample_data: data/Sample_Policy_Data.csv
+  dq_rules: data/DQ_Rule_Repository-Policy.csv
+  cleansing_rules: data/Guidewire_Policy_DataCleansing_Rules.csv
+  kpis: data/DQ_Dashboard_KPIs.csv
+  
+output:
+  dir: output/
+  cleansing_rules_json: output/cleansing_rules.json
+
+s3:
+  bucket: dq-artifacts
+  prefix: dq-inputs/
+
+thresholds:
+  remediation_trigger_pct: 0.05
+
+llm:
+  enabled: true
+  model: gpt-4-mini
+
+learning:
+  type: neondb
+  schema: dq_validator

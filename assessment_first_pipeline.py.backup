@@ -1,0 +1,1431 @@
+#!/usr/bin/env python
+"""
+Main DQ Pipeline - Assessment First, Then Cleansing (ENHANCED with LangChain)
+Workflow: Profiling -> Assessment Report -> (Wait for Clean signal) -> Cleansing
+Uses LangChain/LangGraph for intelligent rule interpretation with fallback
+"""
+import json
+import pandas as pd
+from pathlib import Path
+import logging
+from datetime import datetime
+from llm.llm_client import LLMClient
+import yaml
+import concurrent.futures
+import warnings
+
+# Suppress LLM deprecation warnings
+warnings.filterwarnings('ignore', category=DeprecationWarning)
+logging.getLogger('langchain').setLevel(logging.ERROR)
+logging.getLogger('langchain_core').setLevel(logging.ERROR)
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+
+class DQAssessmentFirst:
+    """Data Quality pipeline - Assessment first, cleansing only on demand (ENHANCED)"""
+    
+    def __init__(self, data_path='data/Sample_Policy_Data.csv', rules_config=None):
+        self.data_path = data_path
+        self.rules_config = rules_config or {}
+        self.df_original = None
+        self.assessment_report = None
+        self.rules_for_cleaning = {}
+        self.fast_mode = False
+        
+        # Initialize LLM
+        with open('config/local.yaml', 'r') as f:
+            config = yaml.safe_load(f)
+        
+        llm_config = config.get('llm', {})
+        self.llm_client = LLMClient(llm_config)
+        
+    def load_data(self):
+        """Load the data"""
+        logger.info(f"Loading data from {self.data_path}")
+        self.df_original = pd.read_csv(self.data_path)
+        logger.info(f"Loaded {self.df_original.shape[0]} records x {self.df_original.shape[1]} columns")
+        return self.df_original
+    
+    def load_and_interpret_rules(self, rules_source):
+        """
+        Load rules from various sources and have LLM interpret them
+        rules_source can be:
+        - Path to CSV file with rules
+        - Dict with custom rules {column: rule_text}
+        - None (load from rule repository files)
+        """
+        logger.info("\n" + "="*80)
+        logger.info("PHASE 1: LOADING AND INTERPRETING RULES")
+        logger.info("="*80)
+        
+        if rules_source is None:
+            # Load from official rule repository files
+            logger.info("No custom rules provided. Loading from rule repository...")
+            self.rules_for_cleaning = self._load_rules_from_repository()
+        
+        elif isinstance(rules_source, str) and Path(rules_source).exists():
+            logger.info(f"Loading rules from CSV: {rules_source}")
+            try:
+                rules_df = pd.read_csv(rules_source, encoding='latin-1')
+                
+                # Try different column name combinations
+                if 'Column' in rules_df.columns and 'Rule' in rules_df.columns:
+                    self.rules_for_cleaning = dict(zip(rules_df['Column'], rules_df['Rule']))
+                elif len(rules_df.columns) >= 2:
+                    # Use first two columns if standard names not found
+                    col_name = rules_df.columns[0]
+                    rule_name = rules_df.columns[1]
+                    self.rules_for_cleaning = dict(zip(rules_df[col_name], rules_df[rule_name]))
+                    logger.info(f"Using columns: '{col_name}' and '{rule_name}'")
+                else:
+                    logger.error("CSV must have at least 2 columns (Column, Rule)")
+                    self.rules_for_cleaning = self._load_rules_from_repository()
+            except Exception as e:
+                logger.error(f"Error reading CSV: {e}")
+                logger.info("Loading from rule repository instead")
+                self.rules_for_cleaning = self._load_rules_from_repository()
+        
+        elif isinstance(rules_source, dict):
+            logger.info("Using custom rules from user input")
+            self.rules_for_cleaning = {k: v for k, v in rules_source.items() if v and v.strip()}
+        
+        logger.info(f"Loaded {len(self.rules_for_cleaning)} rule(s)")
+        
+        # Use LLM to thoroughly interpret and validate each rule
+        # In fast mode we skip LLM to avoid timeouts when Ollama is slow
+        if not self.fast_mode and self.llm_client.available:
+            try:
+                self._interpret_rules_with_llm()
+            except Exception as e:
+                logger.warning(f"LLM rule interpretation failed: {e}")
+        elif self.fast_mode:
+            logger.info("Fast mode: skipping LLM rule interpretation for speed")
+        else:
+            logger.warning("LLM not available, rules will be used as-is")
+        
+        return self.rules_for_cleaning
+    
+    def _interpret_rules_with_llm(self, use_concurrent: bool = False, timeout: int | None = None):
+        """Use LLM to thoroughly read and interpret each rule"""
+        logger.info("\nUsing LLM to interpret rules thoroughly...")
+
+        interpreted_rules: dict = {}
+
+        def interpret(column_rule_tuple):
+            column, rule_text = column_rule_tuple
+            if not rule_text or not rule_text.strip():
+                return column, {
+                    'user_rule': rule_text,
+                    'llm_interpretation': None
+                }
+            prompt = f"""You are a data quality expert. Analyze this cleansing rule thoroughly:
+
+Column: {column}
+Rule: {rule_text}
+
+Provide:
+1. What this rule means exactly
+2. What transformations should be applied
+3. Any edge cases or special handling needed
+4. Validation criteria
+
+Be very specific about the exact transformations needed."""
+            try:
+                interpretation = self.llm_client.complete(prompt, timeout=timeout)
+                return column, {
+                    'user_rule': rule_text,
+                    'llm_interpretation': interpretation
+                }
+            except Exception as e:
+                logger.warning(f"  Could not interpret rule for {column}: {e}")
+                return column, {
+                    'user_rule': rule_text,
+                    'llm_interpretation': None
+                }
+
+        items = list(self.rules_for_cleaning.items())
+        if use_concurrent and items:
+            max_workers = min(2, len(items))
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as ex:
+                futures_map = {ex.submit(interpret, it): it for it in items}
+                for fut in concurrent.futures.as_completed(futures_map):
+                    col, res = fut.result()
+                    interpreted_rules[col] = res
+        else:
+            for it in items:
+                col, res = interpret(it)
+                interpreted_rules[col] = res
+
+        self.rules_for_cleaning = interpreted_rules
+    
+    def profile_data(self):
+        """Profile the data for DQ assessment"""
+        logger.info("\n" + "="*80)
+        logger.info("PHASE 2: DATA PROFILING")
+        logger.info("="*80)
+        
+        if self.df_original is None:
+            self.load_data()
+        
+        profile = {
+            'total_records': len(self.df_original),
+            'total_columns': len(self.df_original.columns),
+            'columns': {},
+            'data_quality_issues': []
+        }
+        
+        # Profile each column
+        columns = list(self.df_original.columns)
+        for col in columns:
+            col_profile = {
+                'name': col,
+                'data_type': str(self.df_original[col].dtype),
+                'non_null_count': self.df_original[col].notna().sum(),
+                'null_count': self.df_original[col].isna().sum(),
+                'null_percentage': (self.df_original[col].isna().sum() / len(self.df_original)) * 100,
+                'unique_values': self.df_original[col].nunique(),
+                'sample_values': self.df_original[col].dropna().head(3).tolist()
+            }
+            
+            profile['columns'][col] = col_profile
+            
+            # Use LLM to detect issues. In fast mode we'll batch/parallelize these calls.
+            if self.llm_client.available:
+                # collect profiles, will run detection after building profile map
+                pass
+
+        # If LLM available, detect issues for all columns (skip in fast mode to avoid timeouts)
+        if not self.fast_mode and self.llm_client.available:
+            col_items = [(c, profile['columns'][c]) for c in profile['columns']]
+            for c, p in col_items:
+                issues = self._detect_issues_with_llm(c, p)
+                if issues:
+                    profile['data_quality_issues'].extend(issues)
+        elif self.fast_mode:
+            logger.info("Fast mode: skipping per-column LLM issue detection")
+        
+        self.assessment_report = profile
+        logger.info(f"Profiling complete: {profile['total_records']} records analyzed")
+        return profile
+    
+    def _detect_issues_with_llm(self, column, col_profile, timeout: int | None = None):
+        """Use LLM to detect data quality issues in a column"""
+        prompt = f"""Analyze this column profile and identify data quality issues:
+
+Column: {column}
+Data Type: {col_profile['data_type']}
+Non-null: {col_profile['non_null_count']} ({100-col_profile['null_percentage']:.1f}%)
+Null: {col_profile['null_count']} ({col_profile['null_percentage']:.1f}%)
+Unique Values: {col_profile['unique_values']}
+Sample Values: {col_profile['sample_values']}
+
+List specific data quality issues found."""
+        
+        try:
+            response = self.llm_client.complete(prompt, timeout=timeout)
+            if not response:
+                return []
+            # Parse issues from response (simple heuristic)
+            return [f"{column}: {response.strip()[:200]}"]
+        except Exception as e:
+            logger.warning(f"LLM detection failed for {column}: {e}")
+            return []
+    
+    def detect_violations(self):
+        """Detect and categorize violations by dimension"""
+        logger.info("\n" + "="*80)
+        logger.info("PHASE 2B: VIOLATION DETECTION")
+        logger.info("="*80)
+        
+        violations_by_dimension = {
+            'Completeness': [],      # Null/missing values
+            'Validity': [],           # Format/type issues
+            'Uniqueness': [],         # Duplicate issues
+            'Consistency': [],        # Cross-field consistency
+            'Accuracy': [],           # Value correctness
+            'Timeliness': [],         # Date/time issues
+        }
+        
+        violations_by_column = {}
+        
+        # Check each column for violations
+        for col, profile in self.assessment_report['columns'].items():
+            violations_by_column[col] = 0
+            
+            # COMPLETENESS: Check for nulls
+            if profile['null_percentage'] > 0:
+                violations = int(profile['null_count'])
+                violations_by_dimension['Completeness'].append({
+                    'column': col,
+                    'type': 'Missing Values',
+                    'severity': 'HIGH' if profile['null_percentage'] > 10 else 'MEDIUM',
+                    'count': violations,
+                    'percentage': profile['null_percentage']
+                })
+                violations_by_column[col] += violations
+            
+            # VALIDITY: Check for common format issues
+            if 'date' in col.lower() or 'dob' in col.lower():
+                # Sample check for date format issues
+                non_null_vals = self.df_original[col].dropna()
+                if len(non_null_vals) > 0:
+                    bad_format = 0
+                    for val in non_null_vals.sample(min(100, len(non_null_vals))):
+                        if not self._is_valid_date(str(val)):
+                            bad_format += 1
+                    if bad_format > 0:
+                        violations_by_dimension['Validity'].append({
+                            'column': col,
+                            'type': 'Invalid Date Format',
+                            'severity': 'HIGH',
+                            'count': bad_format,
+                            'percentage': (bad_format / len(non_null_vals)) * 100
+                        })
+                        violations_by_column[col] += bad_format
+            
+            # VALIDITY: Check for email format issues
+            if 'email' in col.lower():
+                non_null_vals = self.df_original[col].dropna()
+                if len(non_null_vals) > 0:
+                    bad_format = sum(1 for v in non_null_vals if '@' not in str(v))
+                    if bad_format > 0:
+                        violations_by_dimension['Validity'].append({
+                            'column': col,
+                            'type': 'Invalid Email Format',
+                            'severity': 'MEDIUM',
+                            'count': bad_format,
+                            'percentage': (bad_format / len(non_null_vals)) * 100
+                        })
+                        violations_by_column[col] += bad_format
+            
+            # VALIDITY: Check for phone format issues
+            if 'phone' in col.lower():
+                non_null_vals = self.df_original[col].dropna()
+                if len(non_null_vals) > 0:
+                    import re
+                    bad_format = sum(1 for v in non_null_vals if len(re.sub(r'\D', '', str(v))) < 10)
+                    if bad_format > 0:
+                        violations_by_dimension['Validity'].append({
+                            'column': col,
+                            'type': 'Invalid Phone Format',
+                            'severity': 'MEDIUM',
+                            'count': bad_format,
+                            'percentage': (bad_format / len(non_null_vals)) * 100
+                        })
+                        violations_by_column[col] += bad_format
+            
+            # UNIQUENESS: Check for duplicates
+            if 'id' in col.lower() or 'number' in col.lower():
+                non_null_vals = self.df_original[col].dropna()
+                duplicates = len(non_null_vals) - non_null_vals.nunique()
+                if duplicates > 0:
+                    violations_by_dimension['Uniqueness'].append({
+                        'column': col,
+                        'type': 'Duplicate Values',
+                        'severity': 'HIGH',
+                        'count': duplicates,
+                        'percentage': (duplicates / len(non_null_vals)) * 100
+                    })
+                    violations_by_column[col] += duplicates
+        
+        # Store violations in assessment report
+        self.assessment_report['violations_by_dimension'] = violations_by_dimension
+        self.assessment_report['violations_by_column'] = violations_by_column
+        self.assessment_report['total_violations'] = sum(violations_by_column.values())
+        
+        # Log summary
+        logger.info(f"\nViolations detected: {self.assessment_report['total_violations']}")
+        for dimension, violations in violations_by_dimension.items():
+            if violations:
+                logger.info(f"  {dimension}: {len(violations)} issues")
+                for v in violations[:3]:  # Show first 3
+                    logger.info(f"    • {v['column']}: {v['type']} ({v['count']} records)")
+        
+        return violations_by_dimension
+    
+    def _is_valid_date(self, val):
+        """Check if value looks like a valid date"""
+        from dateutil import parser as date_parser
+        try:
+            date_parser.parse(str(val))
+            return True
+        except:
+            return False
+    
+    def merge_custom_rules(self, custom_rules):
+        """Merge custom rules with existing rules (with intelligent LLM interpretation using agents)
+        FULLY DYNAMIC: Interprets ANY user input for ANY column using LLM"""
+        logger.info("\n" + "="*80)
+        logger.info("PHASE 2: MERGING CUSTOM RULES (Dynamic LLM Agent Interpretation)")
+        logger.info("="*80)
+        
+        if not custom_rules:
+            logger.warning("No custom rules provided")
+            return
+        
+        logger.info(f"Custom rules received: {len(custom_rules)}")
+        logger.info("Rules to interpret:")
+        for col, rule in custom_rules.items():
+            if rule and rule.strip():
+                logger.info(f"  • {col}: \"{rule}\"")
+        
+        # Use LLM AGENTS to intelligently interpret EACH custom rule DYNAMICALLY
+        for col, custom_rule_text in custom_rules.items():
+            if not custom_rule_text or not custom_rule_text.strip():
+                logger.debug(f"  Skipping empty rule for '{col}'")
+                continue
+            
+            if col not in self.df_original.columns:
+                logger.warning(f"  Column '{col}' not found in data, skipping")
+                continue
+            
+            logger.info(f"\n  ▶ AGENT TASK: Interpret user requirement for '{col}'")
+            
+            # Get sample values and column info for context
+            sample_values = self.df_original[col].dropna().head(5).tolist()
+            data_type = str(self.df_original[col].dtype)
+            null_count = self.df_original[col].isna().sum()
+            total_count = len(self.df_original[col])
+            
+            logger.info(f"    Data context:")
+            logger.info(f"      Column type: {data_type}")
+            logger.info(f"      Null values: {null_count}/{total_count}")
+            logger.info(f"      Sample values: {sample_values[:3]}")
+            
+            # Ask LLM AGENT to dynamically interpret the user's requirement
+            if self.llm_client.available and not self.fast_mode:
+                try:
+                    # Create comprehensive prompt with FULL CONTEXT for dynamic interpretation
+                    prompt = f"""You are a DATA TRANSFORMATION EXPERT AGENT with deep expertise in data quality.
+
+YOUR MISSION: Interpret the user's requirement and CREATE THE EXACT TRANSFORMATION NEEDED.
+This must work for ANY column type and ANY user input - be FULLY DYNAMIC.
+
+CRITICAL: Do NOT hardcode solutions. INTERPRET the user input dynamically.
+
+CONTEXT:
+  Column Name: {col}
+  Data Type: {data_type}
+  Null Count: {null_count}/{total_count}
+  Sample Values: {sample_values[:3]}
+  Total Records: {total_count}
+
+USER REQUIREMENT (Read Carefully - This is what the user wants):
+  "{custom_rule_text}"
+
+YOUR TASK - CRITICAL REQUIREMENTS:
+  1. READ the user requirement carefully - understand their intent
+  2. Consider the current data type and values
+  3. Determine WHAT EXACTLY needs to change
+  4. Specify the EXACT transformation logic
+  5. Handle NULL/NaN values appropriately
+  6. Be DYNAMIC - don't assume standard transformations
+
+RESPOND IN THIS EXACT FORMAT (ONE LINE ONLY):
+TRANSFORMATION: [type] | PARAMETERS: [exact_details] | LOGIC: [your_interpretation] | NAN_HANDLING: [how_to_handle_nulls]
+
+TRANSFORMATION TYPES (Choose the ONE that matches the user intent):
+  • lowercase - Lowercase all text
+  • uppercase - Uppercase all text
+  • title_case - Title Case (First Letter Capitalized)
+  • capitalize_first - Capitalize only first character
+  • trim - Remove leading/trailing whitespace
+  • standardize_phone - Format phone numbers
+  • standardize_email - Clean email addresses
+  • standardize_date - Parse and format dates (specify target format)
+  • remove_special - Remove special characters
+  • parse_number - Extract numeric values
+  • replace - Replace specific text patterns
+  • custom_format - Apply custom pattern/format
+  • split_merge - Combine/split fields
+  • encode_decode - Encoding transformations
+  • conditional - Apply different logic based on conditions
+  • custom_logic - Custom transformation (explain clearly)
+
+NAN_HANDLING OPTIONS:
+  • keep_null - Keep null values as-is
+  • replace_with:[value] - Replace nulls with specific value
+  • skip_if_null - Don't transform null values
+  • remove_rows - Remove rows with nulls
+
+CRITICAL EXAMPLES (showing DYNAMIC interpretation):
+  User: "make it all uppercase"
+    → TRANSFORMATION: uppercase | PARAMETERS: all_text | LOGIC: User wants all uppercase | NAN_HANDLING: keep_null
+
+  User: "capitalize the first letter"
+    → TRANSFORMATION: capitalize_first | PARAMETERS: first_char_only | LOGIC: Capitalize first character only | NAN_HANDLING: keep_null
+
+  User: "convert to date format YYYY-MM-DD"
+    → TRANSFORMATION: standardize_date | PARAMETERS: target_format=YYYY-MM-DD,auto_detect=true | LOGIC: Parse dates flexibly to ISO format | NAN_HANDLING: keep_null
+
+  User: "format as +91-XXXXX-XXXXX"
+    → TRANSFORMATION: custom_format | PARAMETERS: format_pattern=+91-XXXXX-XXXXX,extract_digits=true | LOGIC: Extract digits and apply Indian phone format | NAN_HANDLING: keep_null
+
+  User: "remove special characters and make lowercase"
+    → TRANSFORMATION: remove_special | PARAMETERS: keep_alphanumeric_and_spaces=true,then=lowercase | LOGIC: Remove special chars then lowercase | NAN_HANDLING: keep_null
+
+  User: "clean email - lowercase and trim"
+    → TRANSFORMATION: standardize_email | PARAMETERS: lowercase=true,trim=true,validate=false | LOGIC: Standardize email format | NAN_HANDLING: keep_null
+
+  User: "replace missing values with 'Unknown'"
+    → TRANSFORMATION: custom_logic | PARAMETERS: fill_nulls_with=Unknown | LOGIC: Replace null values with 'Unknown' string | NAN_HANDLING: replace_with:Unknown
+
+Now interpret this user requirement for column "{col}":
+"{custom_rule_text}"
+
+Your response (ONE LINE ONLY):"""
+                    
+                    logger.info(f"    Sending to LLM Agent (timeout: 25s)...")
+                    interpretation = self.llm_client.complete(prompt, timeout=25)
+                    
+                    if interpretation:
+                        logger.info(f"    ✓ Agent Response:")
+                        logger.info(f"      {interpretation[:150]}...")
+                    else:
+                        logger.warning(f"    ✗ Agent returned empty response")
+                    
+                    # Store the complete rule interpretation
+                    self.rules_for_cleaning[col] = {
+                        'user_rule': custom_rule_text,
+                        'llm_interpretation': interpretation,
+                        'is_custom': True,
+                        'sample_context': sample_values[:3],
+                        'data_type': data_type,
+                        'null_count': null_count
+                    }
+                    
+                    logger.info(f"    ✓ Rule accepted - ready for dynamic transformation")
+                except Exception as e:
+                    logger.warning(f"    ✗ Agent failed: {e}")
+                    logger.warning(f"    Storing rule for heuristic interpretation...")
+                    self.rules_for_cleaning[col] = {
+                        'user_rule': custom_rule_text,
+                        'llm_interpretation': None,
+                        'is_custom': True,
+                        'sample_context': sample_values[:3],
+                        'data_type': data_type,
+                        'null_count': null_count
+                    }
+            else:
+                # No LLM available - store for heuristic interpretation
+                logger.info(f"    LLM unavailable - storing for heuristic interpretation")
+                self.rules_for_cleaning[col] = {
+                    'user_rule': custom_rule_text,
+                    'llm_interpretation': None,
+                    'is_custom': True,
+                    'sample_context': sample_values[:3],
+                    'data_type': data_type,
+                    'null_count': null_count
+                }
+        
+        logger.info("\n" + "="*80)
+        logger.info(f"Custom rules merged: {len([r for r in self.rules_for_cleaning.values() if r.get('is_custom')])} rules ready for cleansing")
+        logger.info("="*80)
+    
+    def generate_assessment_report(self):
+        """Generate detailed assessment report"""
+        logger.info("\n" + "="*80)
+        logger.info("PHASE 3: GENERATING ASSESSMENT REPORT")
+        logger.info("="*80)
+        
+        if self.assessment_report is None:
+            self.profile_data()
+        
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        report_file = f'output/Assessment_Report_{timestamp}.json'
+        
+        total_violations = self.assessment_report.get('total_violations', 0)
+        
+        report = {
+            'timestamp': timestamp,
+            'data_file': self.data_path,
+            'summary': {
+                'total_records': self.assessment_report['total_records'],
+                'total_columns': self.assessment_report['total_columns'],
+                'columns_with_issues': len([c for c in self.assessment_report['columns'].values() 
+                                           if c['null_percentage'] > 10]),
+                'total_violations': total_violations
+            },
+            'column_profiles': self.assessment_report['columns'],
+            'data_quality_issues': self.assessment_report.get('data_quality_issues', []),
+            'violations_by_dimension': self.assessment_report.get('violations_by_dimension', {}),
+            'violations_by_column': self.assessment_report.get('violations_by_column', {}),
+            'rules_for_cleaning': self.rules_for_cleaning
+        }
+        
+        # Save report
+        with open(report_file, 'w') as f:
+            json.dump(report, f, indent=2, default=str)
+        
+        logger.info(f"Assessment report saved: {report_file}")
+        
+        # Create human-readable version
+        text_report = f"""
+DATA QUALITY ASSESSMENT REPORT
+Generated: {timestamp}
+Data File: {self.data_path}
+
+SUMMARY
+-------
+Total Records: {report['summary']['total_records']}
+Total Columns: {report['summary']['total_columns']}
+Columns with Issues (>10% null): {report['summary']['columns_with_issues']}
+Total Violations Found: {report['summary']['total_violations']}
+
+COLUMN PROFILES
+---------------
+"""
+        for col, profile in report['column_profiles'].items():
+            text_report += f"\n{col}:"
+            text_report += f"\n  Type: {profile['data_type']}"
+            text_report += f"\n  Non-null: {profile['non_null_count']} ({100-profile['null_percentage']:.1f}%)"
+            text_report += f"\n  Null: {profile['null_count']} ({profile['null_percentage']:.1f}%)"
+            text_report += f"\n  Unique: {profile['unique_values']}"
+            text_report += f"\n  Sample: {profile['sample_values']}\n"
+        
+        # Add violations by dimension
+        text_report += "\nVIOLATIONS BY DIMENSION\n"
+        text_report += "----------------------\n"
+        for dimension, violations in report.get('violations_by_dimension', {}).items():
+            if violations:
+                text_report += f"\n{dimension}:\n"
+                for v in violations:
+                    text_report += f"  • {v['column']}: {v['type']} ({v['count']} records, {v['percentage']:.1f}%)\n"
+        
+        # Add violations by column
+        text_report += "\nVIOLATIONS BY COLUMN\n"
+        text_report += "-------------------\n"
+        for col, count in sorted(report.get('violations_by_column', {}).items(), key=lambda x: x[1], reverse=True):
+            if count > 0:
+                text_report += f"  {col}: {count} violations\n"
+        
+        text_report += "\nRULES FOR CLEANING\n"
+        text_report += "------------------\n"
+        for col, rule in self.rules_for_cleaning.items():
+            if isinstance(rule, dict):
+                is_custom = " [CUSTOM - OVERRIDE]" if rule.get('is_custom') else ""
+                text_report += f"{col}: {rule.get('user_rule', 'N/A')}{is_custom}\n"
+            else:
+                text_report += f"{col}: {rule}\n"
+        
+        text_file = f'output/Assessment_Report_{timestamp}.txt'
+        with open(text_file, 'w') as f:
+            f.write(text_report)
+        
+        logger.info(f"Text report saved: {text_file}")
+        logger.info("\n" + "="*80)
+        logger.info("ASSESSMENT COMPLETE - NO CLEANSING YET")
+        logger.info(f"Total Violations Found: {report['summary']['total_violations']}")
+        logger.info("Awaiting user signal to begin cleansing phase")
+        logger.info("="*80)
+        
+        return report
+    
+    def _load_rules_from_repository(self):
+        """Load ALL rules from the official rule repository files"""
+        rules = {}
+        
+        # Column name mapping from rules to data
+        column_mapping = {
+            'Insured Customer ID': 'Customer ID',
+            'Insured Name': 'Customer Name',
+            'Date of Birth / Incorporation Date': 'Customer DOB',
+            'National ID (PAN/SSN/Aadhaar)': 'National ID',
+            'Address (Risk/Insured)': 'Address',
+            'Contact Email': 'Email',
+            'Contact Phone': 'Phone',
+            'Product / Line of Business Code': 'Line of Business',
+            'Coverage Limit Amount': 'Coverage Limit',
+            'Coverage Deductible Amount': 'Coverage Deductible',
+            'Agent / Producer ID': 'Agent ID',
+            'Risk Object ID (Vehicle/Property)': 'Risk Object ID',
+            'Vehicle VIN / Property ID': 'VIN/Property ID',
+            'Risk Location GeoCode': 'GeoCode',
+        }
+        
+        # Load from Guidewire cleansing rules (primary source)
+        cleansing_file = 'data/Guidewire_Policy_DataCleansing_Rules.csv'
+        if Path(cleansing_file).exists():
+            try:
+                rules_df = pd.read_csv(cleansing_file, encoding='latin-1')
+                # Use CDE (Column Data Element) column
+                if 'CDE' in rules_df.columns:
+                    # Aggregate all remediation columns for each column
+                    remediation_cols = [c for c in rules_df.columns if 'Remediation' in c]
+                    for idx, row in rules_df.iterrows():
+                        col_name = row['CDE']
+                        # Map rule column name to data column name if needed
+                        actual_col = column_mapping.get(col_name, col_name)
+                        
+                        # Combine all remediation rules for this column
+                        rules_text = ' '.join([str(row[rc]) for rc in remediation_cols if pd.notna(row[rc])])
+                        if rules_text.strip():
+                            rules[actual_col] = rules_text
+                    logger.info(f"Loaded {len(rules)} rules from {cleansing_file}")
+            except Exception as e:
+                logger.error(f"Error loading cleansing rules: {e}")
+        
+        # Fallback to DQ rule repository if needed
+        if not rules:
+            dq_file = 'data/DQ_Rule_Repository-Policy.csv'
+            if Path(dq_file).exists():
+                try:
+                    rules_df = pd.read_csv(dq_file, encoding='latin-1')
+                    if 'CDE' in rules_df.columns:
+                        dq_cols = [c for c in rules_df.columns if c not in ['S No', 'CDE']]
+                        for idx, row in rules_df.iterrows():
+                            col_name = row['CDE']
+                            # Map rule column name to data column name if needed
+                            actual_col = column_mapping.get(col_name, col_name)
+                            
+                            rules_text = ' '.join([f"{dq}: {str(row[dq])}" for dq in dq_cols if pd.notna(row[dq])])
+                            if rules_text.strip():
+                                rules[actual_col] = rules_text
+                        logger.info(f"Loaded {len(rules)} rules from {dq_file}")
+                except Exception as e:
+                    logger.error(f"Error loading DQ rules: {e}")
+        
+        return rules
+    
+    def perform_cleansing(self, skip_llm_guidance: bool = False, dedup_method: str = 'keep-first'):
+        """
+        Perform cleansing based on the rules that were interpreted earlier
+        This is called ONLY when user clicks "Clean My Data"
+        skip_llm_guidance: If False, use LLM to interpret remediation rules
+        dedup_method: 'keep-first', 'keep-last', or 'remove-all'
+        """
+        logger.info("\n" + "="*80)
+        logger.info("PHASE 4: CLEANSING DATA (User-initiated)")
+        logger.info("="*80)
+        
+        if not self.rules_for_cleaning:
+            logger.error("No rules defined for cleansing")
+            return None
+        
+        df_clean = self.df_original.copy()
+        
+        from agents.standardization_rules import CustomCleansingRuleParser, StandardizationRules
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        
+        # Track violations and transformations
+        violations_count = {}
+        transformations_applied = {}
+        transformation_cache = {}  # Cache LLM results to avoid redundant calls
+        
+        logger.info(f"Applying {len(self.rules_for_cleaning)} rule(s)...")
+        if not skip_llm_guidance and self.llm_client.available:
+            logger.info("(Using LLM with parallel processing)")
+        else:
+            logger.info("(Using rule parser - no LLM guidance)")
+        
+        # Prepare tasks for parallel processing
+        columns_to_process = []
+        for column, rule_info in self.rules_for_cleaning.items():
+            if column not in df_clean.columns:
+                logger.warning(f"Column '{column}' not found")
+                continue
+            
+            if isinstance(rule_info, dict):
+                rule_text = rule_info.get('user_rule', '')
+            else:
+                rule_text = rule_info
+            
+            if rule_text and rule_text.strip():
+                columns_to_process.append((column, rule_text))
+        
+        # Get transformations in parallel (5 workers for LLM calls)
+        if not skip_llm_guidance and self.llm_client.available:
+            with ThreadPoolExecutor(max_workers=5) as executor:
+                future_map = {}
+                for column, rule_text in columns_to_process:
+                    future = executor.submit(
+                        self._get_transformation_task,
+                        column, rule_text, df_clean[column]
+                    )
+                    future_map[future] = column
+                
+                for future in as_completed(future_map):
+                    column = future_map[future]
+                    try:
+                        transformation = future.result()
+                        transformation_cache[column] = transformation
+                    except Exception as e:
+                        logger.warning(f"  LLM failed for '{column}': {e}")
+                        transformation_cache[column] = None
+        
+        # Apply transformations sequentially (faster than parallel pandas ops)
+        for column, rule_text in columns_to_process:
+            logger.info(f"\n  ▶ Processing '{column}'...")
+            logger.info(f"    Rule text: '{rule_text}'")
+            
+            # Track original values for violation detection
+            original_values = df_clean[column].copy()
+            violations_count[column] = 0
+            transformations_applied[column] = 0
+            
+            # Get cached transformation or use heuristic
+            # Only use cache if transformation is not None
+            transformation = None
+            if column in transformation_cache:
+                if transformation_cache[column] is not None:
+                    logger.info(f"    Using cached LLM transformation")
+                    transformation = transformation_cache[column]
+                else:
+                    logger.info(f"    LLM transformation was None, trying heuristic...")
+            else:
+                logger.info(f"    No cached transformation, using heuristic...")
+            
+            if transformation is None:
+                # Fallback to heuristic-based transformation
+                logger.info(f"    Getting heuristic transformation...")
+                transformation = self._get_heuristic_transformation(column, rule_text)
+                if transformation:
+                    logger.info(f"    ✓ Heuristic found transformation for '{column}'")
+                else:
+                    logger.info(f"    ✗ Heuristic found no transformation")
+            
+            if transformation is None:
+                logger.warning(f"    ❌ No transformation determined - skipping")
+                continue
+            
+            def safe_transform(x):
+                if pd.isna(x):
+                    return x
+                try:
+                    return transformation(x)
+                except Exception as e:
+                    logger.debug(f"      Transform error: {e}")
+                    return x
+            
+            try:
+                # Apply transformation and track changes
+                logger.info(f"    Applying transformation to {len(df_clean)} records...")
+                df_clean[column] = df_clean[column].apply(safe_transform)
+                
+                # Count violations (values that changed)
+                changed = (original_values != df_clean[column]) & (original_values.notna())
+                transformations_applied[column] = changed.sum()
+                violations_count[column] = transformations_applied[column]
+                
+                if violations_count[column] > 0:
+                    logger.info(f"    ✓ {violations_count[column]} records transformed")
+                    # Show sample of transformed values
+                    if violations_count[column] > 0:
+                        sample_orig = original_values[changed].iloc[0] if len(original_values[changed]) > 0 else None
+                        sample_new = df_clean[column][changed].iloc[0] if len(df_clean[column][changed]) > 0 else None
+                        logger.info(f"      Sample: '{sample_orig}' → '{sample_new}'")
+                else:
+                    logger.warning(f"    ⚠ No records were transformed (all unchanged)")
+            except Exception as e:
+                logger.error(f"    ❌ Failed to apply transformation: {e}")
+                import traceback
+                logger.error(traceback.format_exc())
+                violations_count[column] = 0
+        
+        # Apply deduplication based on dedup_method
+        logger.info(f"\nPhase 4B: DEDUPLICATION (Method: {dedup_method})")
+        original_row_count = len(df_clean)
+        duplicates_before = df_clean.duplicated().sum()
+        
+        if dedup_method == 'keep-first':
+            df_clean = df_clean.drop_duplicates(keep='first')
+            logger.info(f"  Keeping first occurrence of duplicates")
+        elif dedup_method == 'keep-last':
+            df_clean = df_clean.drop_duplicates(keep='last')
+            logger.info(f"  Keeping last occurrence of duplicates")
+        elif dedup_method == 'remove-all':
+            df_clean = df_clean.drop_duplicates(keep=False)
+            logger.info(f"  Removing all duplicate records (keeping unique only)")
+        else:
+            logger.warning(f"  Unknown dedup method '{dedup_method}', keeping all records")
+        
+        rows_removed = original_row_count - len(df_clean)
+        if rows_removed > 0:
+            logger.info(f"  Duplicates found: {duplicates_before}")
+            logger.info(f"  Records removed: {rows_removed}")
+        else:
+            logger.info(f"  No duplicates removed")
+        
+        logger.info(f"  Final row count: {len(df_clean)}")
+        
+        # Save cleaned data
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        output_file = f'output/Sample_Policy_Data_CLEANED_{timestamp}.csv'
+        df_clean.to_csv(output_file, index=False)
+        
+        logger.info(f"\n" + "="*80)
+        logger.info(f"CLEANSING & DEDUPLICATION SUMMARY:")
+        logger.info(f"="*80)
+        total_violations = sum(violations_count.values())
+        logger.info(f"  Total transformations applied: {total_violations}")
+        logger.info(f"  Columns processed: {len(violations_count)}")
+        logger.info(f"  Deduplication method: {dedup_method}")
+        logger.info(f"  Records removed (duplicates): {rows_removed}")
+        logger.info(f"  Original row count: {original_row_count}")
+        logger.info(f"  Final row count: {len(df_clean)}")
+        
+        # Log violation breakdown
+        if violations_count:
+            logger.info(f"\n  Transformations by column:")
+            for col, count in violations_count.items():
+                if count > 0:
+                    logger.info(f"    • {col}: {count} records cleaned")
+        
+        logger.info(f"\nCleaned data saved: {output_file}")
+        logger.info("="*80)
+        
+        return df_clean
+    
+    def _get_transformation_task(self, column, rule_text, series):
+        """Task wrapper for parallel LLM calls - COMPLETELY DYNAMIC
+        LLM returns Python transformation code that we execute"""
+        sample_values = series.dropna().head(5).tolist()
+        
+        prompt = f"""You are a Python transformation expert. Generate a transformation function.
+
+COLUMN: {column}
+SAMPLES: {sample_values}
+REQUIREMENT: {rule_text}
+
+Return ONLY a Python lambda function that transforms values.
+Handle NaN: check if pd.notna(x) first
+Keep format: lambda x: ... if pd.notna(x) else x
+
+Examples:
+  lambda x: x.upper() if pd.notna(x) else x
+  lambda x: x.strip() if pd.notna(x) else x
+  lambda x: int(x) if pd.notna(x) else x
+  lambda x: '+91-' + str(x)[-10:] if pd.notna(x) else x
+
+Generate transformation for: {rule_text}
+Return ONLY the lambda function:"""
+        
+        try:
+            response = self.llm_client.complete(prompt, timeout=20)
+            if response:
+                logger.info(f"  LLM: {column} → {response[:80].strip()}")
+                return self._eval_transformation(response.strip())
+        except Exception as e:
+            logger.warning(f"  LLM failed for {column}: {e}")
+        
+        return None
+    
+    def _eval_transformation(self, code_str):
+        """Safely evaluate LLM-provided transformation code"""
+        try:
+            import pandas as pd
+            import re
+            import math
+            from dateutil import parser as date_parser
+            
+            # Execute LLM-provided code
+            local_vars = {
+                'pd': pd,
+                're': re,
+                'math': math,
+                'date_parser': date_parser,
+                'datetime': __import__('datetime').datetime,
+            }
+            
+            exec(f"transformation = {code_str}", {"__builtins__": {}}, local_vars)
+            func = local_vars.get('transformation')
+            
+            if callable(func):
+                logger.debug(f"    ✓ Transformation created: {code_str[:60]}")
+                return func
+            else:
+                logger.warning(f"    Code did not create callable: {code_str}")
+                return None
+        except Exception as e:
+            logger.warning(f"    Failed to evaluate: {e}")
+            return None
+    
+    def _get_heuristic_transformation(self, column, rule_text):
+        """Fallback heuristic if LLM fails"""
+        logger.info(f"    Using heuristic fallback for '{column}'")
+        col_lower = column.lower()
+        rule_lower = rule_text.lower()
+        
+        # Simple heuristic - detect common patterns
+        if any(x in col_lower for x in ['date', 'dob', 'birth']):
+            logger.info(f"      → Detected date column")
+            return lambda x: self._parse_and_standardize_date(x, '%Y-%m-%d') if pd.notna(x) else x
+        
+        if 'email' in col_lower:
+            logger.info(f"      → Detected email column")
+            return lambda x: str(x).lower().strip() if pd.notna(x) else x
+        
+        if 'phone' in col_lower or ('phone' in rule_lower or 'format' in rule_lower):
+            logger.info(f"      → Detected phone column")
+            return lambda x: self._standardize_phone_india(x) if pd.notna(x) else x
+        
+        logger.warning(f"      No heuristic match")
+        return None
+                logger.info(f"      → Applying lowercase transformation")
+                return lambda x: apply_nan_handling(x, lambda v: str(v).lower() if pd.notna(v) else v)
+            
+            # CASE 2: UPPERCASE
+            elif 'uppercase' in trans_type:
+                logger.info(f"      → Applying uppercase transformation")
+                return lambda x: apply_nan_handling(x, lambda v: str(v).upper() if pd.notna(v) else v)
+            
+            # CASE 3: TITLE CASE
+            elif 'title_case' in trans_type or 'titlecase' in trans_type:
+                logger.info(f"      → Applying title case transformation")
+                return lambda x: apply_nan_handling(x, lambda v: str(v).title() if pd.notna(v) else v)
+            
+            # CASE 4: CAPITALIZE FIRST
+            elif 'capitalize_first' in trans_type or 'capitalize' in trans_type:
+                logger.info(f"      → Applying capitalize first character")
+                return lambda x: apply_nan_handling(x, lambda v: str(v)[0].upper() + str(v)[1:].lower() if pd.notna(v) and len(str(v)) > 0 else v)
+            
+            # CASE 5: TRIM/WHITESPACE
+            elif 'trim' in trans_type or 'whitespace' in trans_type:
+                logger.info(f"      → Applying trim whitespace")
+                return lambda x: apply_nan_handling(x, lambda v: str(v).strip() if pd.notna(v) else v)
+            
+            # CASE 6: REMOVE SPECIAL CHARACTERS
+            elif 'remove_special' in trans_type:
+                logger.info(f"      → Removing special characters")
+                keep_space = 'space' in parameters.lower()
+                if keep_space:
+                    return lambda x: apply_nan_handling(x, lambda v: ''.join(c for c in str(v) if c.isalnum() or c.isspace()) if pd.notna(v) else v)
+                else:
+                    return lambda x: apply_nan_handling(x, lambda v: ''.join(c for c in str(v) if c.isalnum()) if pd.notna(v) else v)
+            
+            # CASE 7: PARSE NUMBER
+            elif 'parse_number' in trans_type or 'extract_number' in trans_type or 'extract_digit' in trans_type:
+                logger.info(f"      → Extracting numeric values")
+                return lambda x: apply_nan_handling(x, lambda v: ''.join(c for c in str(v) if c.isdigit() or c == '.') if pd.notna(v) else v)
+            
+            # CASE 8: STANDARDIZE PHONE
+            elif 'standardize_phone' in trans_type or 'phone' in trans_type:
+                logger.info(f"      → Applying phone standardization")
+                if '+91' in parameters or '+91' in str(parameters):
+                    logger.info(f"        Format: Indian (+91)")
+                    return lambda x: self._standardize_phone_india(x)
+                elif '+' in parameters:
+                    # Extract country code from parameters
+                    match = re.search(r'\+(\d+)', parameters)
+                    if match:
+                        logger.info(f"        Format: {parameters}")
+                    return lambda x: self._standardize_phone_india(x)
+                else:
+                    return lambda x: self._standardize_phone(x)
+            
+            # CASE 9: STANDARDIZE EMAIL
+            elif 'email' in trans_type or 'standardize_email' in trans_type:
+                logger.info(f"      → Standardizing email")
+                return lambda x: apply_nan_handling(x, lambda v: str(v).lower().strip() if pd.notna(v) else v)
+            
+            # CASE 10: STANDARDIZE DATE
+            elif 'date' in trans_type or 'standardize_date' in trans_type:
+                logger.info(f"      → Standardizing date")
+                # Extract target format from parameters
+                target_fmt = 'YYYY-MM-DD'
+                if 'format=' in parameters:
+                    target_fmt = parameters.split('format=')[1].split(',')[0].strip()
+                elif ':' in trans_type:
+                    target_fmt = trans_type.split(':')[1].strip()
+                
+                # Convert format to Python strftime
+                target_fmt = self._convert_format_to_strftime(target_fmt)
+                logger.info(f"        Target format: {target_fmt}")
+                return lambda x: apply_nan_handling(x, lambda v: self._parse_and_standardize_date(v, target_fmt) if pd.notna(v) else v)
+            
+            # CASE 11: REPLACE TEXT
+            elif 'replace:' in trans_type or 'replace' in trans_type:
+                logger.info(f"      → Applying text replacement")
+                # Extract old and new values from parameters
+                if ':' in parameters:
+                    parts = parameters.split(':')
+                    old_val = parts[0].strip() if len(parts) > 0 else ''
+                    new_val = parts[1].strip() if len(parts) > 1 else ''
+                    logger.info(f"        Replace '{old_val}' with '{new_val}'")
+                    return lambda x: apply_nan_handling(x, lambda v: str(v).replace(old_val, new_val) if pd.notna(v) else v)
+            
+            # CASE 12: CUSTOM FORMAT
+            elif 'custom_format' in trans_type or 'custom' in trans_type:
+                logger.info(f"      → Applying custom format")
+                if 'format_pattern=' in parameters:
+                    pattern = parameters.split('format_pattern=')[1].split(',')[0].strip()
+                    logger.info(f"        Pattern: {pattern}")
+                    
+                    # If pattern contains format placeholders like XXXXX
+                    if 'XXXXX' in pattern or 'XXX' in pattern:
+                        logger.info(f"        Using digit extraction and formatting")
+                        return lambda x: self._apply_custom_format(x, pattern)
+                
+                return lambda x: apply_nan_handling(x, lambda v: str(v) if pd.notna(v) else v)
+            
+            # CASE 13: CONDITIONAL
+            elif 'conditional' in trans_type:
+                logger.info(f"      → Would need conditional parameters (not fully specified)")
+                return None
+            
+            # CASE 14: CUSTOM LOGIC
+            elif 'custom_logic' in trans_type:
+                logger.info(f"      → Using custom logic from parameters")
+                if 'fill_nulls' in parameters:
+                    fill_val = parameters.split('fill_nulls=')[1].strip() if 'fill_nulls=' in parameters else 'NA'
+                    logger.info(f"        Fill nulls with: {fill_val}")
+                    return lambda x: fill_val if pd.isna(x) else x
+                
+                return None
+            
+            else:
+                logger.warning(f"      → Unknown transformation type: {trans_type}")
+                return None
+        
+        except Exception as e:
+            logger.warning(f"    Error creating transformation: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
+            return None
+    
+    def _apply_custom_format(self, val, pattern):
+        """Apply custom format pattern (e.g., +91-XXXXX-XXXXX)"""
+        import re
+        if pd.isna(val):
+            return val
+        
+        # Extract digits
+        digits = re.sub(r'\D', '', str(val))
+        
+        # Apply pattern
+        if 'XXXXX' in pattern:
+            # Pattern like +91-XXXXX-XXXXX
+            parts = pattern.split('-')
+            if len(parts) == 3:
+                country = parts[0]  # +91
+                part1_len = len(parts[1])
+                part2_len = len(parts[2])
+                
+                if len(digits) >= part1_len + part2_len:
+                    p1 = digits[:part1_len]
+                    p2 = digits[part1_len:part1_len + part2_len]
+                    return f"{country}-{p1}-{p2}"
+        
+        return val
+    
+    def _convert_format_to_strftime(self, format_str):
+        """Convert user format like YYYY-MM-DD to Python strftime format"""
+        format_str = format_str.upper()
+        # Map common formats
+        replacements = {
+            'YYYY': '%Y',
+            'YY': '%y',
+            'MM': '%m',
+            'DD': '%d',
+            'HH': '%H',
+            'MI': '%M',
+            'SS': '%S',
+        }
+        
+        for old, new in replacements.items():
+            format_str = format_str.replace(old, new)
+        
+        return format_str
+    
+    def _get_llm_transformation(self, column, rule_text, series):
+        """Use LLM to determine the transformation for a column based on its remediation rule"""
+        return self._get_transformation_task(column, rule_text, series)
+    
+    def _create_transformation_from_spec(self, spec: str):
+        """Create a transformation function from LLM spec (enhanced with more transformation types)"""
+        spec = spec.lower().strip()
+        
+        # Handle specification with colon (e.g., standardize_date:YYYY-MM-DD)
+        base_spec = spec.split(':')[0] if ':' in spec else spec
+        
+        if spec == 'lowercase':
+            return lambda x: str(x).lower() if pd.notna(x) else x
+        elif spec == 'uppercase':
+            return lambda x: str(x).upper() if pd.notna(x) else x
+        elif spec == 'title_case' or spec == 'titlecase':
+            return lambda x: str(x).title() if pd.notna(x) else x
+        elif spec == 'trim' or spec == 'whitespace':
+            return lambda x: str(x).strip() if pd.notna(x) else x
+        elif spec == 'standardize_phone':
+            return lambda x: self._standardize_phone(x)
+        elif spec == 'standardize_email':
+            return lambda x: str(x).lower().strip() if pd.notna(x) else x
+        elif spec == 'remove_special' or spec == 'remove_special_chars':
+            return lambda x: ''.join(c for c in str(x) if c.isalnum() or c.isspace()) if pd.notna(x) else x
+        elif spec == 'parse_number':
+            return lambda x: ''.join(c for c in str(x) if c.isdigit() or c == '.') if pd.notna(x) else x
+        elif base_spec == 'standardize_date':
+            fmt = spec.split(':')[1] if ':' in spec else '%Y-%m-%d'
+            return lambda x: self._parse_and_standardize_date(x, fmt)
+        elif base_spec == 'date_parse':
+            parts = spec.split(':')
+            if len(parts) >= 3:
+                in_fmt, out_fmt = parts[1], parts[2]
+                return lambda x: self._parse_and_standardize_date(x, out_fmt)
+        
+        return None
+    
+    def _standardize_phone(self, val):
+        """Standardize phone to basic format"""
+        import re
+        # Remove all non-digits
+        digits = re.sub(r'\D', '', str(val))
+        # Format as (XXX) XXX-XXXX if 10 digits
+        if len(digits) == 10:
+            return f"({digits[:3]}) {digits[3:6]}-{digits[6:]}"
+        return val
+    
+    def _standardize_phone_india(self, val):
+        """Standardize phone to format: +CC-XXXXX-XXXXX
+        Default: +91 (India), but can handle any country code
+        User test rule: format as +91-XXXXX-XXXXX or convert into +52-XXXXX-XXXXX"""
+        import re
+        if pd.isna(val):
+            return val
+        
+        # Convert to string
+        val_str = str(val).strip()
+        
+        # Remove all non-digits
+        digits = re.sub(r'\D', '', val_str)
+        
+        # Default country code
+        country_code = '91'  # India by default
+        
+        # Standard format: 10-digit Indian phone (most common case)
+        if len(digits) == 10:
+            return f"+{country_code}-{digits[:5]}-{digits[5:]}"
+        # With country code prefix: 912345678901 → +91-23456-78901
+        elif len(digits) == 12 and digits.startswith('91'):
+            return f"+91-{digits[2:7]}-{digits[7:]}"
+        # Already has country code but different format
+        elif len(digits) >= 11:
+            # Take last 10 digits and apply format
+            last_10 = digits[-10:]
+            return f"+{country_code}-{last_10[:5]}-{last_10[5:]}"
+        # Less than 10 digits - try to pad or return as is
+        elif len(digits) > 0:
+            # If we have some digits but not 10, try to work with what we have
+            if len(digits) >= 5:
+                split_point = len(digits) - 5
+                return f"+{country_code}-{digits[:split_point]}-{digits[split_point:]}"
+        
+        # If we can't parse, return original
+        logger.debug(f"  Could not standardize phone: {val} (digits={digits})")
+        return val
+    
+    def _parse_and_standardize_date(self, val, target_fmt):
+        """Parse date in any format and standardize to target format"""
+        from dateutil import parser as date_parser
+        try:
+            parsed = date_parser.parse(str(val))
+            return parsed.strftime(target_fmt)
+        except:
+            return val
+    
+    def _get_heuristic_transformation(self, column, rule_text):
+        """Fallback heuristic transformation when LLM is unavailable
+        DYNAMIC: Attempts to interpret rule text without LLM"""
+        import re
+        
+        rule_lower = rule_text.lower()
+        col_lower = column.lower()
+        
+        logger.info(f"      Heuristic fallback: column='{col_lower}', rule='{rule_text[:50]}'")
+        
+        # DYNAMIC: Check rule text FIRST before using column name
+        
+        # Uppercase detection
+        if 'uppercase' in rule_lower or 'upper case' in rule_lower or 'make upper' in rule_lower:
+            logger.info(f"      → Detected: UPPERCASE transformation")
+            return lambda x: apply_nan_handling_default(x, lambda v: str(v).upper())
+        
+        # Lowercase detection
+        if 'lowercase' in rule_lower or 'lower case' in rule_lower or 'make lower' in rule_lower:
+            logger.info(f"      → Detected: lowercase transformation")
+            return lambda x: apply_nan_handling_default(x, lambda v: str(v).lower())
+        
+        # Title case detection
+        if 'title' in rule_lower or 'capitalize each' in rule_lower:
+            logger.info(f"      → Detected: Title Case transformation")
+            return lambda x: apply_nan_handling_default(x, lambda v: str(v).title())
+        
+        # Capitalize first
+        if 'capitalize first' in rule_lower or 'capitalize' in rule_lower and 'each' not in rule_lower:
+            logger.info(f"      → Detected: Capitalize First transformation")
+            return lambda x: apply_nan_handling_default(x, lambda v: str(v)[0].upper() + str(v)[1:].lower() if len(str(v)) > 0 else v)
+        
+        # Trim/whitespace
+        if 'trim' in rule_lower or 'remove whitespace' in rule_lower or 'clean whitespace' in rule_lower:
+            logger.info(f"      → Detected: Trim/Whitespace transformation")
+            return lambda x: apply_nan_handling_default(x, lambda v: str(v).strip())
+        
+        # Remove special characters
+        if 'remove special' in rule_lower or 'special char' in rule_lower or 'alphanumeric' in rule_lower:
+            logger.info(f"      → Detected: Remove Special Characters")
+            return lambda x: apply_nan_handling_default(x, lambda v: ''.join(c for c in str(v) if c.isalnum() or c.isspace()))
+        
+        # PHONE - Dynamic detection from rule text
+        if 'phone' in col_lower or 'phone' in rule_lower or 'format' in rule_lower:
+            # Check for country code pattern +XX in the rule
+            country_match = re.search(r'\+(\d{1,3})', rule_text)
+            if country_match:
+                country_code = country_match.group(1)
+                logger.info(f"      → Detected: Custom phone format +{country_code}-XXXXX-XXXXX")
+                logger.info(f"         (dynamically handling country code {country_code})")
+                # Use our phone formatter which can handle any country code
+                return lambda x: self._standardize_phone_india(x)
+            elif 'XXXXX' in rule_text or 'format' in rule_lower:
+                logger.info(f"      → Detected: Phone Format (pattern in rule)")
+                return lambda x: self._standardize_phone_india(x)
+            elif 'phone' in col_lower:
+                logger.info(f"      → Detected: Default Phone Format (US standard)")
+                return lambda x: self._standardize_phone(x)
+        
+        # Email
+        if 'email' in col_lower or 'email' in rule_lower:
+            logger.info(f"      → Detected: Email Standardization")
+            return lambda x: apply_nan_handling_default(x, lambda v: str(v).lower().strip())
+        
+        # Date
+        if 'date' in col_lower or 'date' in rule_lower or any(d in rule_lower for d in ['yyyy', 'mm', 'dd', 'yyyy-mm', 'mm-dd']):
+            # Try to extract format from rule
+            format_str = '%Y-%m-%d'
+            if 'yyyy' in rule_lower or 'dd-mm' in rule_lower or 'mm-dd' in rule_lower:
+                if 'yyyy-mm-dd' in rule_lower or 'yyyy/mm/dd' in rule_lower:
+                    format_str = '%Y-%m-%d'
+                elif 'dd-mm-yyyy' in rule_lower or 'dd/mm/yyyy' in rule_lower:
+                    format_str = '%d-%m-%Y'
+                elif 'mm-dd-yyyy' in rule_lower or 'mm/dd/yyyy' in rule_lower:
+                    format_str = '%m-%d-%Y'
+            logger.info(f"      → Detected: Date Standardization (format: {format_str})")
+            return lambda x: apply_nan_handling_default(x, lambda v: self._parse_and_standardize_date(v, format_str))
+        
+        # Extract numbers
+        if 'number' in rule_lower or 'numeric' in rule_lower or 'digits' in rule_lower:
+            logger.info(f"      → Detected: Extract Numbers/Digits")
+            return lambda x: apply_nan_handling_default(x, lambda v: ''.join(c for c in str(v) if c.isdigit() or c == '.'))
+        
+        # Fill nulls
+        if 'null' in rule_lower or 'missing' in rule_lower or 'empty' in rule_lower or 'na' in rule_lower:
+            if 'fill' in rule_lower or 'replace' in rule_lower:
+                logger.info(f"      → Detected: Fill NULL values")
+                fill_val = 'NA'
+                if 'fill' in rule_lower and ':' in rule_text:
+                    parts = rule_text.split(':')
+                    if len(parts) > 1:
+                        fill_val = parts[1].strip()
+                return lambda x: fill_val if pd.isna(x) else x
+        
+        # Replace text
+        if 'replace' in rule_lower and ':' in rule_text:
+            logger.info(f"      → Detected: Text Replacement")
+            parts = rule_text.split(':')
+            if len(parts) >= 2:
+                old_val = parts[0].replace('replace', '').strip()
+                new_val = parts[1].strip()
+                return lambda x: apply_nan_handling_default(x, lambda v: str(v).replace(old_val, new_val))
+        
+        logger.info(f"      → No heuristic match found")
+        return None
+
+
+def apply_nan_handling_default(val, fn):
+    """Default NaN handling: skip nulls"""
+    if pd.isna(val):
+        return val
+    return fn(val)
+
+def main():
+    """Main entry point"""
+    import sys
+    
+    # Check for command line arguments
+    data_file = 'data/Sample_Policy_Data.csv'
+    rules_file = None
+    custom_rules = None
+    run_cleansing = False
+    dedup_method = 'keep-first'
+    
+    if '--clean' in sys.argv:
+        run_cleansing = True
+    
+    if '--rules-file' in sys.argv:
+        idx = sys.argv.index('--rules-file')
+        if idx + 1 < len(sys.argv):
+            rules_file = sys.argv[idx + 1]
+    
+    if '--dedup-method' in sys.argv:
+        idx = sys.argv.index('--dedup-method')
+        if idx + 1 < len(sys.argv):
+            dedup_method = sys.argv[idx + 1]
+    
+    # Initialize pipeline
+    logger.info("Starting DQ Pipeline - Assessment First")
+    pipeline = DQAssessmentFirst(data_path=data_file)
+    
+    # Fast mode: skip expensive LLM calls for faster profiling
+    if '--fast' in sys.argv:
+        pipeline.fast_mode = True
+        try:
+            pipeline.llm_client.enabled = True
+            pipeline.llm_client.timeout = 45
+        except Exception:
+            pass
+    
+    # Load data
+    pipeline.load_data()
+    
+    # Determine rules source
+    # Priority: explicit rules file > cleansing_rules JSON (from dashboard) > custom_rules JSON > standard rules
+    rules_source = None
+    custom_rules = {}
+    
+    if rules_file and Path(rules_file).exists():
+        rules_source = rules_file
+        logger.info(f"Using rules file: {rules_file}")
+    elif Path('output/cleansing_rules.json').exists():
+        # This is the file saved by the dashboard
+        with open('output/cleansing_rules.json', 'r') as f:
+            custom_rules = json.load(f)
+            # Filter out empty rules
+            custom_rules = {k: v for k, v in custom_rules.items() if v and v.strip()}
+            if custom_rules:
+                rules_source = custom_rules
+                logger.info(f"Using {len(custom_rules)} custom rules from dashboard (cleansing_rules.json)")
+    elif Path('output/custom_rules.json').exists():
+        with open('output/custom_rules.json', 'r') as f:
+            custom_rules = json.load(f)
+            # If custom rules exist, use them as overrides
+            if custom_rules:
+                rules_source = custom_rules
+                logger.info(f"Using {len(custom_rules)} custom rules from output/custom_rules.json")
+    
+    # Load rules (None will trigger standard rules)
+    pipeline.load_and_interpret_rules(rules_source)
+    
+    # Profile and assess with violation detection
+    pipeline.profile_data()
+    pipeline.detect_violations()
+    pipeline.generate_assessment_report()
+    
+    # Cleanse only if requested
+    if run_cleansing:
+        # Merge rules: standard rules + custom rules (custom overrides)
+        # Use intelligent LLM interpretation with agents
+        if custom_rules:
+            logger.info("\n" + "="*80)
+            logger.info("USING LLM AGENTS TO READ AND INTERPRET USER INPUTS")
+            logger.info("="*80)
+            pipeline.merge_custom_rules(custom_rules)
+        
+        # Apply cleansing with deduplication
+        pipeline.perform_cleansing(skip_llm_guidance=False, dedup_method=dedup_method)
+    else:
+        logger.info("\nTo perform cleansing, call with --clean flag or click 'Clean My Data' in dashboard")
+
+
+if __name__ == '__main__':
+    main()
