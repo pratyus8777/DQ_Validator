@@ -159,10 +159,23 @@ def sanitize_dataframe(df):
 def load_original_data():
     """Load original data"""
     try:
+        # Prefer explicit original exports if available
         original_files = sorted(glob.glob('output/Sample_Policy_Data_ORIGINAL_*.csv'))
         if original_files:
             return sanitize_dataframe(pd.read_csv(original_files[-1]))
-        return sanitize_dataframe(pd.read_csv('data/Sample_Policy_Data.csv'))
+
+        # Next prefer the canonical data file in the data/ folder
+        data_path = Path('data') / 'Sample_Policy_Data.csv'
+        if data_path.exists():
+            return sanitize_dataframe(pd.read_csv(data_path))
+
+        # As a last resort, if only cleaned outputs exist, use the most recent cleaned CSV
+        cleaned_files = sorted(glob.glob('output/Sample_Policy_Data_CLEANED_*.csv'))
+        if cleaned_files:
+            # Use cleaned file as source if original is missing (helps local dev/demo)
+            return sanitize_dataframe(pd.read_csv(cleaned_files[-1]))
+
+        return None
     except Exception:
         return None
 

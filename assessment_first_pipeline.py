@@ -1007,67 +1007,93 @@ COLUMN PROFILES
                 sample_rule = self.rules_for_cleaning[sample_col]
                 logger.info(f"DEBUG: Sample rule for '{sample_col}': {type(sample_rule)} = {str(sample_rule)[:100]}")
             
-            # Prepare tasks for parallel processing
+            # Prepare tasks for processing: include system and user rules
             columns_to_process = []
             for column, rule_info in self.rules_for_cleaning.items():
                 if column not in df_clean.columns:
-                    logger.warning(f"Column '{column}' not found")
+                    logger.debug(f"Column '{column}' not found in data, skipping")
                     continue
-                
+
+                if isinstance(rule_info, dict):
+                    # user_rule holds the textual requirement (or system rule interpreted into dict)
+                    rule_text = rule_info.get('user_rule', '')
+                else:
+                    rule_text = rule_info
+
+                # Only process non-empty rule texts
+                if rule_text and str(rule_text).strip():
+                    columns_to_process.append((column, rule_info))
+
+            # Apply transformations to each column, preferring LLM-generated functions
+            for column, rule_info in columns_to_process:
+                # Normalize rule text extraction
                 if isinstance(rule_info, dict):
                     rule_text = rule_info.get('user_rule', '')
                 else:
                     rule_text = rule_info
-                
-                if rule_text and rule_text.strip():
-                    columns_to_process.append((column, rule_text))
-            
-            # Apply custom transformations to each column
-            for column, rule_text in columns_to_process:
-                logger.info(f"\n  ▶ Processing custom rule for '{column}'...")
-                logger.info(f"    Rule: '{rule_text}'")
-                
-                # Track original values
+
+                logger.info(f"\n  ▶ Processing rule for '{column}'...")
+                logger.info(f"    Rule Text: '{str(rule_text)[:120]}'")
+
                 original_values = df_clean[column].copy()
-                
-                # DEBUG: For numeric columns, show sample original values
+
+                # DEBUG: show range for numeric columns
                 if column in ['agent_commission', 'premium', 'coverage_limit']:
-                    max_val = original_values.max()
-                    min_val = original_values.min()
-                    logger.info(f"    DEBUG: Original range [{min_val}, {max_val}]")
-                
-                # Get heuristic transformation (fast)
-                transformation = self._get_heuristic_transformation(column, rule_text)
-                
+                    try:
+                        max_val = original_values.max()
+                        min_val = original_values.min()
+                        logger.info(f"    DEBUG: Original range [{min_val}, {max_val}]")
+                    except Exception:
+                        pass
+
+                transformation = None
+
+                # 1) If LLM guidance is allowed and available, try to generate a transformation function
+                if not skip_llm_guidance and self.llm_client.available:
+                    try:
+                        logger.info("    Attempting LLM-generated transformation (dynamic)")
+                        # Provide the series for context so LLM can produce tailored lambda
+                        transformation = self._get_transformation_task(column, str(rule_text), df_clean[column])
+                    except Exception as e:
+                        logger.warning(f"    LLM generation failed: {e}")
+
+                # 2) If no LLM result, but we have a cached heuristic/interpretation stored in rule_info, try to use it
+                if transformation is None and isinstance(rule_info, dict):
+                    # If the stored llm_interpretation contains actionable code, try evaluating it
+                    llm_interp = rule_info.get('llm_interpretation')
+                    if llm_interp and isinstance(llm_interp, str) and llm_interp.strip().startswith('lambda'):
+                        try:
+                            transformation = self._eval_transformation(llm_interp.strip())
+                            logger.info("    Used cached llm_interpretation as transformation")
+                        except Exception:
+                            transformation = None
+
+                # 3) Fallback to heuristic transformation
                 if transformation is None:
-                    logger.warning(f"    ✗ Could not determine transformation")
+                    transformation = self._get_heuristic_transformation(column, str(rule_text))
+
+                if transformation is None:
+                    logger.warning(f"    ✗ Could not determine transformation for '{column}' (rule: {rule_text})")
                     continue
-                
-                # Apply transformation
+
+                # Apply transformation safely
                 try:
-                    df_clean[column] = df_clean[column].apply(
-                        lambda x: transformation(x) if pd.notna(x) else x
-                    )
-                    
-                    # Count changes
+                    df_clean[column] = df_clean[column].apply(lambda x: transformation(x) if pd.notna(x) else x)
+
                     changed = (original_values != df_clean[column]) & (original_values.notna())
-                    count_changed = changed.sum()
-                    
+                    count_changed = int(changed.sum())
+
                     if count_changed > 0:
                         violations_count[column] = violations_count.get(column, 0) + count_changed
-                        logger.info(f"    ✓ {count_changed} records transformed")
-                        # Show sample
+                        logger.info(f"    ✓ {count_changed} records transformed for '{column}'")
                         if len(original_values[changed]) > 0:
                             sample_orig = original_values[changed].iloc[0]
                             sample_new = df_clean[column][changed].iloc[0]
                             logger.info(f"      Sample: '{sample_orig}' → '{sample_new}' (type: {type(sample_new)})")
                     else:
-                        # DEBUG: No changes detected - maybe all values are already in range?
-                        if column in ['agent_commission', 'premium', 'coverage_limit', 'underwriting_score']:
-                            sample_vals = df_clean[column].head(3).values
-                            logger.info(f"    ℹ No changes (sample values: {sample_vals})")
+                        logger.info(f"    ℹ No changes detected for '{column}' after applying transformation")
                 except Exception as e:
-                    logger.warning(f"    ✗ Error applying transformation: {e}")
+                    logger.warning(f"    ✗ Error applying transformation for '{column}': {e}")
         
         else:
             logger.debug("(No custom rules defined)")

@@ -1,0 +1,323 @@
+
+DATA QUALITY ASSESSMENT REPORT
+Generated: 20260807_113736
+Data File: data/Sample_Policy_Data.csv
+
+SUMMARY
+-------
+Total Records: 202
+Total Columns: 30
+Columns with Issues (>10% null): 4
+Total Violations Found: 663
+
+COLUMN PROFILES
+---------------
+
+policy_number:
+  Type: object
+  Non-null: 201 (99.5%)
+  Null: 1 (0.5%)
+  Unique: 201
+  Sample: ['POL-73622479', 'POL-65602418', 'POL-68005744']
+
+policy_effective_date:
+  Type: object
+  Non-null: 201 (99.5%)
+  Null: 1 (0.5%)
+  Unique: 193
+  Sample: ['5/7/2022', '27-11-2019', '11/3/2021']
+
+policy_expiry_date:
+  Type: object
+  Non-null: 201 (99.5%)
+  Null: 1 (0.5%)
+  Unique: 195
+  Sample: ['28-12-2022', '8/11/2021', '24-10-2022']
+
+policy_term:
+  Type: object
+  Non-null: 202 (100.0%)
+  Null: 0 (0.0%)
+  Unique: 4
+  Sample: ['Multi-Year', 'Multi-Year', 'Short-term']
+
+policy_status:
+  Type: object
+  Non-null: 202 (100.0%)
+  Null: 0 (0.0%)
+  Unique: 7
+  Sample: ['Active', 'Cancelled', 'Active']
+
+customer_id:
+  Type: object
+  Non-null: 201 (99.5%)
+  Null: 1 (0.5%)
+  Unique: 201
+  Sample: ['CUST840871', 'CUST483105', 'CUST151795']
+
+customer_name:
+  Type: object
+  Non-null: 201 (99.5%)
+  Null: 1 (0.5%)
+  Unique: 7
+  Sample: ['John Smith', 'Alice Smith', 'Wei Chen']
+
+customer_dob:
+  Type: object
+  Non-null: 201 (99.5%)
+  Null: 1 (0.5%)
+  Unique: 198
+  Sample: ['28-11-1992', '23-06-1998', '22-04-1972']
+
+national_id:
+  Type: object
+  Non-null: 202 (100.0%)
+  Null: 0 (0.0%)
+  Unique: 202
+  Sample: ['BP5NQT2IAV', 'DXXTVNSN8L', 'SDCBZ2BA91']
+
+address:
+  Type: object
+  Non-null: 202 (100.0%)
+  Null: 0 (0.0%)
+  Unique: 6
+  Sample: ['456 Park Ave, LA, 90001', '123 Main St, NY, 10001', '123 Main St, NY, 10001']
+
+phone:
+  Type: object
+  Non-null: 202 (100.0%)
+  Null: 0 (0.0%)
+  Unique: 202
+  Sample: ['4974689883', '3007015169', '7314315323']
+
+email:
+  Type: object
+  Non-null: 202 (100.0%)
+  Null: 0 (0.0%)
+  Unique: 168
+  Sample: ['john70@example.com', 'alice85@example.com', 'wei86@example.com']
+
+line_of_business:
+  Type: object
+  Non-null: 202 (100.0%)
+  Null: 0 (0.0%)
+  Unique: 7
+  Sample: ['Health', 'WorkersComp', 'Health']
+
+coverage_code:
+  Type: object
+  Non-null: 201 (99.5%)
+  Null: 1 (0.5%)
+  Unique: 201
+  Sample: ['COV67011', 'COV35092', 'COV28942']
+
+coverage_name:
+  Type: object
+  Non-null: 202 (100.0%)
+  Null: 0 (0.0%)
+  Unique: 202
+  Sample: ['3811865', '3643781', '3383818']
+
+coverage_limit:
+  Type: object
+  Non-null: 202 (100.0%)
+  Null: 0 (0.0%)
+  Unique: 202
+  Sample: ['355786', '163182', '241890']
+
+premium:
+  Type: object
+  Non-null: 202 (100.0%)
+  Null: 0 (0.0%)
+  Unique: 202
+  Sample: ['23528.25', '34864.1', '21082.83']
+
+payment_frequency:
+  Type: object
+  Non-null: 202 (100.0%)
+  Null: 0 (0.0%)
+  Unique: 4
+  Sample: ['Quarterly', 'Monthly', 'Quarterly']
+
+agent_id:
+  Type: object
+  Non-null: 202 (100.0%)
+  Null: 0 (0.0%)
+  Unique: 202
+  Sample: ['AGT40447', 'AGT46261', 'AGT18839']
+
+agent_commission:
+  Type: object
+  Non-null: 202 (100.0%)
+  Null: 0 (0.0%)
+  Unique: 194
+  Sample: ['13.21', '18.16', '5.32']
+
+underwriting_score:
+  Type: object
+  Non-null: 202 (100.0%)
+  Null: 0 (0.0%)
+  Unique: 202
+  Sample: ['UW00258', 'UW95389', 'UW43118']
+
+risk_object:
+  Type: object
+  Non-null: 202 (100.0%)
+  Null: 0 (0.0%)
+  Unique: 202
+  Sample: ['RISK21023', 'RISK57090', 'RISK88176']
+
+vin_property_id:
+  Type: object
+  Non-null: 202 (100.0%)
+  Null: 0 (0.0%)
+  Unique: 202
+  Sample: ['5Y2BO9EEC8SFS0F3R', 'GTAGVWNNJV49QSNEZ', 'DCG7Y8YXG24A5WUMR']
+
+geo_code:
+  Type: object
+  Non-null: 202 (100.0%)
+  Null: 0 (0.0%)
+  Unique: 202
+  Sample: ['-15.079814, -101.774792', '23.084603, -1.037959', '88.269266, 5.558867']
+
+endorsement:
+  Type: object
+  Non-null: 50 (24.8%)
+  Null: 152 (75.2%)
+  Unique: 50
+  Sample: ['END6133', 'END3379', 'END3374']
+
+endorsement_date:
+  Type: object
+  Non-null: 50 (24.8%)
+  Null: 152 (75.2%)
+  Unique: 50
+  Sample: ['15-06-2020', '8/12/2019', '20-12-2016']
+
+cancellation_date:
+  Type: object
+  Non-null: 28 (13.9%)
+  Null: 174 (86.1%)
+  Unique: 28
+  Sample: ['21-03-2020', '6/2/2023', '4/10/2019']
+
+renewal_flag:
+  Type: object
+  Non-null: 202 (100.0%)
+  Null: 0 (0.0%)
+  Unique: 3
+  Sample: ['N', 'N', 'N']
+
+reinsurance_flag:
+  Type: object
+  Non-null: 46 (22.8%)
+  Null: 156 (77.2%)
+  Unique: 46
+  Sample: ['RI904770', 'RI736189', 'RI183325']
+
+regulatory_reporting_flag:
+  Type: object
+  Non-null: 202 (100.0%)
+  Null: 0 (0.0%)
+  Unique: 3
+  Sample: ['N', 'N', 'Y']
+
+VIOLATIONS BY DIMENSION
+----------------------
+
+Completeness:
+  • policy_number: Missing Values (1 records, 0.5%)
+  • policy_effective_date: Missing Values (1 records, 0.5%)
+  • policy_expiry_date: Missing Values (1 records, 0.5%)
+  • customer_id: Missing Values (1 records, 0.5%)
+  • customer_name: Missing Values (1 records, 0.5%)
+  • customer_dob: Missing Values (1 records, 0.5%)
+  • coverage_code: Missing Values (1 records, 0.5%)
+  • endorsement: Missing Values (152 records, 75.2%)
+  • endorsement_date: Missing Values (152 records, 75.2%)
+  • cancellation_date: Missing Values (174 records, 86.1%)
+  • reinsurance_flag: Missing Values (156 records, 77.2%)
+
+Validity:
+  • phone: Invalid Phone Format (21 records, 10.4%)
+  • email: Invalid Email Format (1 records, 0.5%)
+
+VIOLATIONS BY COLUMN
+-------------------
+  cancellation_date: 174 violations
+  reinsurance_flag: 156 violations
+  endorsement: 152 violations
+  endorsement_date: 152 violations
+  phone: 21 violations
+  policy_number: 1 violations
+  policy_effective_date: 1 violations
+  policy_expiry_date: 1 violations
+  customer_id: 1 violations
+  customer_name: 1 violations
+  customer_dob: 1 violations
+  email: 1 violations
+  coverage_code: 1 violations
+
+RULES FOR CLEANING
+------------------
+policy_number: If Policy Number is null, trigger exception workflow and assign to data steward; if available in external source (CRM, KYC, Master), auto-fill. If Policy Number fails format/regex check, auto-standardize using regex/parsing; otherwise route to steward. Cross-check Policy Number with trusted source system (CRM, billing, KYC); auto-correct if match found; else flag for manual validation. Perform reconciliation with other systems; if mismatch, mark Policy as 'Pending Review' until corrected. Check for duplicates; if found, merge or retain master record based on survivorship rules. If Policy Number is delayed, trigger SLA breach alert; attempt to fetch from latest transaction log; else notify steward. Validate referential integrity; if missing parent (e.g., Policy, Customer), queue record for correction before load. Check business ranges; if out-of-range, set to default threshold or flag as error for underwriter review.
+policy_effective_date: If Policy Effective Date is null, trigger exception workflow and assign to data steward; if available in external source (CRM, KYC, Master), auto-fill. If Policy Effective Date fails format/regex check, auto-standardize using regex/parsing; otherwise route to steward. Cross-check Policy Effective Date with trusted source system (CRM, billing, KYC); auto-correct if match found; else flag for manual validation. Perform reconciliation with other systems; if mismatch, mark Policy as 'Pending Review' until corrected. Check for duplicates; if found, merge or retain master record based on survivorship rules. If Policy Effective Date is delayed, trigger SLA breach alert; attempt to fetch from latest transaction log; else notify steward. Validate referential integrity; if missing parent (e.g., Policy, Customer), queue record for correction before load. Check business ranges; if out-of-range, set to default threshold or flag as error for underwriter review.
+policy_expiry_date: If Policy Expiry Date is null, trigger exception workflow and assign to data steward; if available in external source (CRM, KYC, Master), auto-fill. If Policy Expiry Date fails format/regex check, auto-standardize using regex/parsing; otherwise route to steward. Cross-check Policy Expiry Date with trusted source system (CRM, billing, KYC); auto-correct if match found; else flag for manual validation. Perform reconciliation with other systems; if mismatch, mark Policy as 'Pending Review' until corrected. Check for duplicates; if found, merge or retain master record based on survivorship rules. If Policy Expiry Date is delayed, trigger SLA breach alert; attempt to fetch from latest transaction log; else notify steward. Validate referential integrity; if missing parent (e.g., Policy, Customer), queue record for correction before load. Check business ranges; if out-of-range, set to default threshold or flag as error for underwriter review.
+policy_term: If Policy Term Type is null, trigger exception workflow and assign to data steward; if available in external source (CRM, KYC, Master), auto-fill. If Policy Term Type fails format/regex check, auto-standardize using regex/parsing; otherwise route to steward. Cross-check Policy Term Type with trusted source system (CRM, billing, KYC); auto-correct if match found; else flag for manual validation. Perform reconciliation with other systems; if mismatch, mark Policy as 'Pending Review' until corrected. Check for duplicates; if found, merge or retain master record based on survivorship rules. If Policy Term Type is delayed, trigger SLA breach alert; attempt to fetch from latest transaction log; else notify steward. Validate referential integrity; if missing parent (e.g., Policy, Customer), queue record for correction before load. Check business ranges; if out-of-range, set to default threshold or flag as error for underwriter review.
+policy_status: If Policy Status is null, trigger exception workflow and assign to data steward; if available in external source (CRM, KYC, Master), auto-fill. If Policy Status fails format/regex check, auto-standardize using regex/parsing; otherwise route to steward. Cross-check Policy Status with trusted source system (CRM, billing, KYC); auto-correct if match found; else flag for manual validation. Perform reconciliation with other systems; if mismatch, mark Policy as 'Pending Review' until corrected. Check for duplicates; if found, merge or retain master record based on survivorship rules. If Policy Status is delayed, trigger SLA breach alert; attempt to fetch from latest transaction log; else notify steward. Validate referential integrity; if missing parent (e.g., Policy, Customer), queue record for correction before load. Check business ranges; if out-of-range, set to default threshold or flag as error for underwriter review.
+customer_id: If Insured Customer ID is null, trigger exception workflow and assign to data steward; if available in external source (CRM, KYC, Master), auto-fill. If Insured Customer ID fails format/regex check, auto-standardize using regex/parsing; otherwise route to steward. Cross-check Insured Customer ID with trusted source system (CRM, billing, KYC); auto-correct if match found; else flag for manual validation. Perform reconciliation with other systems; if mismatch, mark Policy as 'Pending Review' until corrected. Check for duplicates; if found, merge or retain master record based on survivorship rules. If Insured Customer ID is delayed, trigger SLA breach alert; attempt to fetch from latest transaction log; else notify steward. Validate referential integrity; if missing parent (e.g., Policy, Customer), queue record for correction before load. Check business ranges; if out-of-range, set to default threshold or flag as error for underwriter review.
+customer_name: If Insured Name is null, trigger exception workflow and assign to data steward; if available in external source (CRM, KYC, Master), auto-fill. If Insured Name fails format/regex check, auto-standardize using regex/parsing; otherwise route to steward. Cross-check Insured Name with trusted source system (CRM, billing, KYC); auto-correct if match found; else flag for manual validation. Perform reconciliation with other systems; if mismatch, mark Policy as 'Pending Review' until corrected. Check for duplicates; if found, merge or retain master record based on survivorship rules. If Insured Name is delayed, trigger SLA breach alert; attempt to fetch from latest transaction log; else notify steward. Validate referential integrity; if missing parent (e.g., Policy, Customer), queue record for correction before load. Check business ranges; if out-of-range, set to default threshold or flag as error for underwriter review.
+customer_dob: If Date of Birth / Incorporation Date is null, trigger exception workflow and assign to data steward; if available in external source (CRM, KYC, Master), auto-fill. If Date of Birth / Incorporation Date fails format/regex check, auto-standardize using regex/parsing; otherwise route to steward. Cross-check Date of Birth / Incorporation Date with trusted source system (CRM, billing, KYC); auto-correct if match found; else flag for manual validation. Perform reconciliation with other systems; if mismatch, mark Policy as 'Pending Review' until corrected. Check for duplicates; if found, merge or retain master record based on survivorship rules. If Date of Birth / Incorporation Date is delayed, trigger SLA breach alert; attempt to fetch from latest transaction log; else notify steward. Validate referential integrity; if missing parent (e.g., Policy, Customer), queue record for correction before load. Check business ranges; if out-of-range, set to default threshold or flag as error for underwriter review.
+national_id: If National ID (PAN/SSN/Aadhaar) is null, trigger exception workflow and assign to data steward; if available in external source (CRM, KYC, Master), auto-fill. If National ID (PAN/SSN/Aadhaar) fails format/regex check, auto-standardize using regex/parsing; otherwise route to steward. Cross-check National ID (PAN/SSN/Aadhaar) with trusted source system (CRM, billing, KYC); auto-correct if match found; else flag for manual validation. Perform reconciliation with other systems; if mismatch, mark Policy as 'Pending Review' until corrected. Check for duplicates; if found, merge or retain master record based on survivorship rules. If National ID (PAN/SSN/Aadhaar) is delayed, trigger SLA breach alert; attempt to fetch from latest transaction log; else notify steward. Validate referential integrity; if missing parent (e.g., Policy, Customer), queue record for correction before load. Check business ranges; if out-of-range, set to default threshold or flag as error for underwriter review.
+address: If Address (Risk/Insured) is null, trigger exception workflow and assign to data steward; if available in external source (CRM, KYC, Master), auto-fill. If Address (Risk/Insured) fails format/regex check, auto-standardize using regex/parsing; otherwise route to steward. Cross-check Address (Risk/Insured) with trusted source system (CRM, billing, KYC); auto-correct if match found; else flag for manual validation. Perform reconciliation with other systems; if mismatch, mark Policy as 'Pending Review' until corrected. Check for duplicates; if found, merge or retain master record based on survivorship rules. If Address (Risk/Insured) is delayed, trigger SLA breach alert; attempt to fetch from latest transaction log; else notify steward. Validate referential integrity; if missing parent (e.g., Policy, Customer), queue record for correction before load. Check business ranges; if out-of-range, set to default threshold or flag as error for underwriter review.
+email: If Contact Email is null, trigger exception workflow and assign to data steward; if available in external source (CRM, KYC, Master), auto-fill. If Contact Email fails format/regex check, auto-standardize using regex/parsing; otherwise route to steward. Cross-check Contact Email with trusted source system (CRM, billing, KYC); auto-correct if match found; else flag for manual validation. Perform reconciliation with other systems; if mismatch, mark Policy as 'Pending Review' until corrected. Check for duplicates; if found, merge or retain master record based on survivorship rules. If Contact Email is delayed, trigger SLA breach alert; attempt to fetch from latest transaction log; else notify steward. Validate referential integrity; if missing parent (e.g., Policy, Customer), queue record for correction before load. Check business ranges; if out-of-range, set to default threshold or flag as error for underwriter review.
+phone: If Contact Phone is null, trigger exception workflow and assign to data steward; if available in external source (CRM, KYC, Master), auto-fill. If Contact Phone fails format/regex check, auto-standardize using regex/parsing; otherwise route to steward. Cross-check Contact Phone with trusted source system (CRM, billing, KYC); auto-correct if match found; else flag for manual validation. Perform reconciliation with other systems; if mismatch, mark Policy as 'Pending Review' until corrected. Check for duplicates; if found, merge or retain master record based on survivorship rules. If Contact Phone is delayed, trigger SLA breach alert; attempt to fetch from latest transaction log; else notify steward. Validate referential integrity; if missing parent (e.g., Policy, Customer), queue record for correction before load. Check business ranges; if out-of-range, set to default threshold or flag as error for underwriter review.
+line_of_business: If Product / Line of Business Code is null, trigger exception workflow and assign to data steward; if available in external source (CRM, KYC, Master), auto-fill. If Product / Line of Business Code fails format/regex check, auto-standardize using regex/parsing; otherwise route to steward. Cross-check Product / Line of Business Code with trusted source system (CRM, billing, KYC); auto-correct if match found; else flag for manual validation. Perform reconciliation with other systems; if mismatch, mark Policy as 'Pending Review' until corrected. Check for duplicates; if found, merge or retain master record based on survivorship rules. If Product / Line of Business Code is delayed, trigger SLA breach alert; attempt to fetch from latest transaction log; else notify steward. Validate referential integrity; if missing parent (e.g., Policy, Customer), queue record for correction before load. Check business ranges; if out-of-range, set to default threshold or flag as error for underwriter review.
+coverage_code: If Coverage ID is null, trigger exception workflow and assign to data steward; if available in external source (CRM, KYC, Master), auto-fill. If Coverage ID fails format/regex check, auto-standardize using regex/parsing; otherwise route to steward. Cross-check Coverage ID with trusted source system (CRM, billing, KYC); auto-correct if match found; else flag for manual validation. Perform reconciliation with other systems; if mismatch, mark Policy as 'Pending Review' until corrected. Check for duplicates; if found, merge or retain master record based on survivorship rules. If Coverage ID is delayed, trigger SLA breach alert; attempt to fetch from latest transaction log; else notify steward. Validate referential integrity; if missing parent (e.g., Policy, Customer), queue record for correction before load. Check business ranges; if out-of-range, set to default threshold or flag as error for underwriter review.
+coverage_limit: If Coverage Limit Amount is null, trigger exception workflow and assign to data steward; if available in external source (CRM, KYC, Master), auto-fill. If Coverage Limit Amount fails format/regex check, auto-standardize using regex/parsing; otherwise route to steward. Cross-check Coverage Limit Amount with trusted source system (CRM, billing, KYC); auto-correct if match found; else flag for manual validation. Perform reconciliation with other systems; if mismatch, mark Policy as 'Pending Review' until corrected. Check for duplicates; if found, merge or retain master record based on survivorship rules. If Coverage Limit Amount is delayed, trigger SLA breach alert; attempt to fetch from latest transaction log; else notify steward. Validate referential integrity; if missing parent (e.g., Policy, Customer), queue record for correction before load. Check business ranges; if out-of-range, set to default threshold or flag as error for underwriter review.
+deductible: If Coverage Deductible Amount is null, trigger exception workflow and assign to data steward; if available in external source (CRM, KYC, Master), auto-fill. If Coverage Deductible Amount fails format/regex check, auto-standardize using regex/parsing; otherwise route to steward. Cross-check Coverage Deductible Amount with trusted source system (CRM, billing, KYC); auto-correct if match found; else flag for manual validation. Perform reconciliation with other systems; if mismatch, mark Policy as 'Pending Review' until corrected. Check for duplicates; if found, merge or retain master record based on survivorship rules. If Coverage Deductible Amount is delayed, trigger SLA breach alert; attempt to fetch from latest transaction log; else notify steward. Validate referential integrity; if missing parent (e.g., Policy, Customer), queue record for correction before load. Check business ranges; if out-of-range, set to default threshold or flag as error for underwriter review.
+premium: If Premium Amount is null, trigger exception workflow and assign to data steward; if available in external source (CRM, KYC, Master), auto-fill. If Premium Amount fails format/regex check, auto-standardize using regex/parsing; otherwise route to steward. Cross-check Premium Amount with trusted source system (CRM, billing, KYC); auto-correct if match found; else flag for manual validation. Perform reconciliation with other systems; if mismatch, mark Policy as 'Pending Review' until corrected. Check for duplicates; if found, merge or retain master record based on survivorship rules. If Premium Amount is delayed, trigger SLA breach alert; attempt to fetch from latest transaction log; else notify steward. Validate referential integrity; if missing parent (e.g., Policy, Customer), queue record for correction before load. Check business ranges; if out-of-range, set to default threshold or flag as error for underwriter review.
+payment_frequency: If Payment Plan is null, trigger exception workflow and assign to data steward; if available in external source (CRM, KYC, Master), auto-fill. If Payment Plan fails format/regex check, auto-standardize using regex/parsing; otherwise route to steward. Cross-check Payment Plan with trusted source system (CRM, billing, KYC); auto-correct if match found; else flag for manual validation. Perform reconciliation with other systems; if mismatch, mark Policy as 'Pending Review' until corrected. Check for duplicates; if found, merge or retain master record based on survivorship rules. If Payment Plan is delayed, trigger SLA breach alert; attempt to fetch from latest transaction log; else notify steward. Validate referential integrity; if missing parent (e.g., Policy, Customer), queue record for correction before load. Check business ranges; if out-of-range, set to default threshold or flag as error for underwriter review.
+agent_id: If Agent / Producer ID is null, trigger exception workflow and assign to data steward; if available in external source (CRM, KYC, Master), auto-fill. If Agent / Producer ID fails format/regex check, auto-standardize using regex/parsing; otherwise route to steward. Cross-check Agent / Producer ID with trusted source system (CRM, billing, KYC); auto-correct if match found; else flag for manual validation. Perform reconciliation with other systems; if mismatch, mark Policy as 'Pending Review' until corrected. Check for duplicates; if found, merge or retain master record based on survivorship rules. If Agent / Producer ID is delayed, trigger SLA breach alert; attempt to fetch from latest transaction log; else notify steward. Validate referential integrity; if missing parent (e.g., Policy, Customer), queue record for correction before load. Check business ranges; if out-of-range, set to default threshold or flag as error for underwriter review.
+agent_commission: If Agent Commission % is null, trigger exception workflow and assign to data steward; if available in external source (CRM, KYC, Master), auto-fill. If Agent Commission % fails format/regex check, auto-standardize using regex/parsing; otherwise route to steward. Cross-check Agent Commission % with trusted source system (CRM, billing, KYC); auto-correct if match found; else flag for manual validation. Perform reconciliation with other systems; if mismatch, mark Policy as 'Pending Review' until corrected. Check for duplicates; if found, merge or retain master record based on survivorship rules. If Agent Commission % is delayed, trigger SLA breach alert; attempt to fetch from latest transaction log; else notify steward. Validate referential integrity; if missing parent (e.g., Policy, Customer), queue record for correction before load. Check business ranges; if out-of-range, set to default threshold or flag as error for underwriter review.
+underwriting_score: If Underwriter ID is null, trigger exception workflow and assign to data steward; if available in external source (CRM, KYC, Master), auto-fill. If Underwriter ID fails format/regex check, auto-standardize using regex/parsing; otherwise route to steward. Cross-check Underwriter ID with trusted source system (CRM, billing, KYC); auto-correct if match found; else flag for manual validation. Perform reconciliation with other systems; if mismatch, mark Policy as 'Pending Review' until corrected. Check for duplicates; if found, merge or retain master record based on survivorship rules. If Underwriter ID is delayed, trigger SLA breach alert; attempt to fetch from latest transaction log; else notify steward. Validate referential integrity; if missing parent (e.g., Policy, Customer), queue record for correction before load. Check business ranges; if out-of-range, set to default threshold or flag as error for underwriter review.
+risk_object: If Risk Object ID (Vehicle/Property) is null, trigger exception workflow and assign to data steward; if available in external source (CRM, KYC, Master), auto-fill. If Risk Object ID (Vehicle/Property) fails format/regex check, auto-standardize using regex/parsing; otherwise route to steward. Cross-check Risk Object ID (Vehicle/Property) with trusted source system (CRM, billing, KYC); auto-correct if match found; else flag for manual validation. Perform reconciliation with other systems; if mismatch, mark Policy as 'Pending Review' until corrected. Check for duplicates; if found, merge or retain master record based on survivorship rules. If Risk Object ID (Vehicle/Property) is delayed, trigger SLA breach alert; attempt to fetch from latest transaction log; else notify steward. Validate referential integrity; if missing parent (e.g., Policy, Customer), queue record for correction before load. Check business ranges; if out-of-range, set to default threshold or flag as error for underwriter review.
+vin_property_id: If Vehicle VIN / Property ID is null, trigger exception workflow and assign to data steward; if available in external source (CRM, KYC, Master), auto-fill. If Vehicle VIN / Property ID fails format/regex check, auto-standardize using regex/parsing; otherwise route to steward. Cross-check Vehicle VIN / Property ID with trusted source system (CRM, billing, KYC); auto-correct if match found; else flag for manual validation. Perform reconciliation with other systems; if mismatch, mark Policy as 'Pending Review' until corrected. Check for duplicates; if found, merge or retain master record based on survivorship rules. If Vehicle VIN / Property ID is delayed, trigger SLA breach alert; attempt to fetch from latest transaction log; else notify steward. Validate referential integrity; if missing parent (e.g., Policy, Customer), queue record for correction before load. Check business ranges; if out-of-range, set to default threshold or flag as error for underwriter review.
+geo_code: If Risk Location GeoCode is null, trigger exception workflow and assign to data steward; if available in external source (CRM, KYC, Master), auto-fill. If Risk Location GeoCode fails format/regex check, auto-standardize using regex/parsing; otherwise route to steward. Cross-check Risk Location GeoCode with trusted source system (CRM, billing, KYC); auto-correct if match found; else flag for manual validation. Perform reconciliation with other systems; if mismatch, mark Policy as 'Pending Review' until corrected. Check for duplicates; if found, merge or retain master record based on survivorship rules. If Risk Location GeoCode is delayed, trigger SLA breach alert; attempt to fetch from latest transaction log; else notify steward. Validate referential integrity; if missing parent (e.g., Policy, Customer), queue record for correction before load. Check business ranges; if out-of-range, set to default threshold or flag as error for underwriter review.
+endorsement: If Endorsement ID is null, trigger exception workflow and assign to data steward; if available in external source (CRM, KYC, Master), auto-fill. If Endorsement ID fails format/regex check, auto-standardize using regex/parsing; otherwise route to steward. Cross-check Endorsement ID with trusted source system (CRM, billing, KYC); auto-correct if match found; else flag for manual validation. Perform reconciliation with other systems; if mismatch, mark Policy as 'Pending Review' until corrected. Check for duplicates; if found, merge or retain master record based on survivorship rules. If Endorsement ID is delayed, trigger SLA breach alert; attempt to fetch from latest transaction log; else notify steward. Validate referential integrity; if missing parent (e.g., Policy, Customer), queue record for correction before load. Check business ranges; if out-of-range, set to default threshold or flag as error for underwriter review.
+endorsement_date: If Endorsement Effective Date is null, trigger exception workflow and assign to data steward; if available in external source (CRM, KYC, Master), auto-fill. If Endorsement Effective Date fails format/regex check, auto-standardize using regex/parsing; otherwise route to steward. Cross-check Endorsement Effective Date with trusted source system (CRM, billing, KYC); auto-correct if match found; else flag for manual validation. Perform reconciliation with other systems; if mismatch, mark Policy as 'Pending Review' until corrected. Check for duplicates; if found, merge or retain master record based on survivorship rules. If Endorsement Effective Date is delayed, trigger SLA breach alert; attempt to fetch from latest transaction log; else notify steward. Validate referential integrity; if missing parent (e.g., Policy, Customer), queue record for correction before load. Check business ranges; if out-of-range, set to default threshold or flag as error for underwriter review.
+cancellation_date: If Cancellation Effective Date is null, trigger exception workflow and assign to data steward; if available in external source (CRM, KYC, Master), auto-fill. If Cancellation Effective Date fails format/regex check, auto-standardize using regex/parsing; otherwise route to steward. Cross-check Cancellation Effective Date with trusted source system (CRM, billing, KYC); auto-correct if match found; else flag for manual validation. Perform reconciliation with other systems; if mismatch, mark Policy as 'Pending Review' until corrected. Check for duplicates; if found, merge or retain master record based on survivorship rules. If Cancellation Effective Date is delayed, trigger SLA breach alert; attempt to fetch from latest transaction log; else notify steward. Validate referential integrity; if missing parent (e.g., Policy, Customer), queue record for correction before load. Check business ranges; if out-of-range, set to default threshold or flag as error for underwriter review.
+renewal_flag: If Renewal Indicator is null, trigger exception workflow and assign to data steward; if available in external source (CRM, KYC, Master), auto-fill. If Renewal Indicator fails format/regex check, auto-standardize using regex/parsing; otherwise route to steward. Cross-check Renewal Indicator with trusted source system (CRM, billing, KYC); auto-correct if match found; else flag for manual validation. Perform reconciliation with other systems; if mismatch, mark Policy as 'Pending Review' until corrected. Check for duplicates; if found, merge or retain master record based on survivorship rules. If Renewal Indicator is delayed, trigger SLA breach alert; attempt to fetch from latest transaction log; else notify steward. Validate referential integrity; if missing parent (e.g., Policy, Customer), queue record for correction before load. Check business ranges; if out-of-range, set to default threshold or flag as error for underwriter review.
+reinsurance_flag: If Reinsurance Contract ID is null, trigger exception workflow and assign to data steward; if available in external source (CRM, KYC, Master), auto-fill. If Reinsurance Contract ID fails format/regex check, auto-standardize using regex/parsing; otherwise route to steward. Cross-check Reinsurance Contract ID with trusted source system (CRM, billing, KYC); auto-correct if match found; else flag for manual validation. Perform reconciliation with other systems; if mismatch, mark Policy as 'Pending Review' until corrected. Check for duplicates; if found, merge or retain master record based on survivorship rules. If Reinsurance Contract ID is delayed, trigger SLA breach alert; attempt to fetch from latest transaction log; else notify steward. Validate referential integrity; if missing parent (e.g., Policy, Customer), queue record for correction before load. Check business ranges; if out-of-range, set to default threshold or flag as error for underwriter review.
+regulatory_reporting_flag: If Regulatory Reporting Flag is null, trigger exception workflow and assign to data steward; if available in external source (CRM, KYC, Master), auto-fill. If Regulatory Reporting Flag fails format/regex check, auto-standardize using regex/parsing; otherwise route to steward. Cross-check Regulatory Reporting Flag with trusted source system (CRM, billing, KYC); auto-correct if match found; else flag for manual validation. Perform reconciliation with other systems; if mismatch, mark Policy as 'Pending Review' until corrected. Check for duplicates; if found, merge or retain master record based on survivorship rules. If Regulatory Reporting Flag is delayed, trigger SLA breach alert; attempt to fetch from latest transaction log; else notify steward. Validate referential integrity; if missing parent (e.g., Policy, Customer), queue record for correction before load. Check business ranges; if out-of-range, set to default threshold or flag as error for underwriter review.
+1: Policy Number
+2: Policy Effective Date
+3: Policy Expiry Date
+4: Policy Term Type
+5: Policy Status
+6: Insured Customer ID
+7: Insured Name
+8: Date of Birth / Incorporation Date
+9: National ID (PAN/SSN/Aadhaar)
+10: Address (Risk/Insured)
+11: Contact Email
+12: Contact Phone
+13: Product / Line of Business Code
+14: Coverage ID
+15: Coverage Limit Amount
+16: Coverage Deductible Amount
+17: Premium Amount
+18: Payment Plan
+19: Agent / Producer ID
+20: Agent Commission %
+21: Underwriter ID
+22: Risk Object ID (Vehicle/Property)
+23: Vehicle VIN / Property ID
+24: Risk Location GeoCode
+25: Endorsement ID
+26: Endorsement Effective Date
+27: Cancellation Effective Date
+28: Renewal Indicator
+29: Reinsurance Contract ID
+30: Regulatory Reporting Flag
